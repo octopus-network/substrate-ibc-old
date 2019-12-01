@@ -55,6 +55,12 @@ decl_module! {
             Ok(())
         }
 
+        #[weight = SimpleDispatchInfo::FixedNormal(1000)]
+        fn recv_packet(origin, packet: Vec<u8>, proof: Vec<Vec<u8>>, proof_height: T::BlockNumber) -> Result {
+            let _sender = ensure_signed(origin)?;
+            Ok(())
+        }
+
         // The signature could also look like: `fn on_initialize()`.
         // This function could also very well have a weight annotation, similar to any other. The
         // only difference being that if it is not annotated, the default is
