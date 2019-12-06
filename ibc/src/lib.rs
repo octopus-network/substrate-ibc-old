@@ -1,11 +1,32 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod handler;
+mod routing;
+
+use codec::{Decode, Encode};
 use rstd::prelude::*;
+use sp_runtime::RuntimeDebug;
 use support::{
     decl_event, decl_module, decl_storage, dispatch::Result, weights::SimpleDispatchInfo,
 };
 use system::ensure_signed;
+
+pub use handler::create_client;
+
+type Identifier = u32;
+
+#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
+pub enum Datagram<Header> {
+    ClientUpdate {
+        identifier: Identifier,
+        header: Header,
+    },
+    ClientMisbehaviour {
+        identifier: Identifier,
+        evidence: Vec<u8>,
+    },
+}
 
 /// Our module's configuration trait. All our types and constants go in here. If the
 /// module is dependent on specific other modules, then their configuration traits
@@ -58,6 +79,13 @@ decl_module! {
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
         fn recv_packet(origin, packet: Vec<u8>, proof: Vec<Vec<u8>>, proof_height: T::BlockNumber) -> Result {
             let _sender = ensure_signed(origin)?;
+            Ok(())
+        }
+
+        #[weight = SimpleDispatchInfo::FixedNormal(1000)]
+        fn submit_datagram(origin, datagram: Datagram<<T as system::Trait>::Header>) -> Result {
+            let _sender = ensure_signed(origin)?;
+            routing::handle_datagram(datagram);
             Ok(())
         }
 
