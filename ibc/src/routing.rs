@@ -1,5 +1,3 @@
-use crate::Datagram;
-
 fn conn_open_try() {}
 fn conn_open_ack() {}
 fn conn_open_confirm() {}
@@ -15,5 +13,3 @@ fn acknowledge_packet() {}
 fn timeout_packet() {}
 fn timeout_on_close() {}
 fn cleanup_packet() {}
-
-pub fn handle_datagram<Header>(datagram: Datagram<Header>) {}

@@ -12,8 +12,6 @@ use support::{
 };
 use system::ensure_signed;
 
-pub use handler::create_client;
-
 type Identifier = u32;
 
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
@@ -26,6 +24,13 @@ pub enum Datagram<Header> {
         identifier: Identifier,
         evidence: Vec<u8>,
     },
+}
+
+#[derive(Encode, Decode, Default)]
+struct Client {
+    client_state: Vec<u8>,
+    consensus_state: Vec<u8>,
+    typ: u32,
 }
 
 /// Our module's configuration trait. All our types and constants go in here. If the
@@ -44,6 +49,7 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
+        Clients: map Vec<u8> => Client;
     }
 }
 
@@ -56,6 +62,9 @@ decl_event!(
         AccountId = <T as system::Trait>::AccountId,
     {
         SomethingStored(u32, AccountId),
+        ClientCreated,
+        ClientUpdated,
+        ClientMisbehaviourReceived,
     }
 );
 
@@ -85,7 +94,7 @@ decl_module! {
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
         fn submit_datagram(origin, datagram: Datagram<<T as system::Trait>::Header>) -> Result {
             let _sender = ensure_signed(origin)?;
-            routing::handle_datagram(datagram);
+            Self::handle_datagram(datagram);
             Ok(())
         }
 
@@ -114,6 +123,32 @@ decl_module! {
             // We don't do anything here.
             // but we could dispatch extrinsic (transaction/unsigned/inherent) using
             // runtime_io::submit_extrinsic
+        }
+    }
+}
+
+impl<T: Trait> Module<T> {
+    pub fn create_client() {
+        let client = Client {
+            client_state: vec![],
+            consensus_state: vec![],
+            typ: 0,
+        };
+        Clients::insert(b"123".to_vec(), client);
+        Self::deposit_event(RawEvent::ClientCreated);
+    }
+
+    pub fn handle_datagram<Header>(datagram: Datagram<Header>) {
+        match datagram {
+            Datagram::ClientUpdate { identifier, header } => {
+                Self::deposit_event(RawEvent::ClientUpdated);
+            }
+            Datagram::ClientMisbehaviour {
+                identifier,
+                evidence,
+            } => {
+                Self::deposit_event(RawEvent::ClientMisbehaviourReceived);
+            }
         }
     }
 }

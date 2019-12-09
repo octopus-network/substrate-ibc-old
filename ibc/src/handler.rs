@@ -1,4 +1,4 @@
-pub fn create_client() {}
+fn create_client() {}
 fn update_client() {}
 fn query_client_consensus_state() {}
 fn query_client() {}
