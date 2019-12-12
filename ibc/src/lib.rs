@@ -6,31 +6,36 @@ mod routing;
 
 use codec::{Decode, Encode};
 use rstd::prelude::*;
-use sp_runtime::RuntimeDebug;
+use sp_runtime::{generic, RuntimeDebug};
 use support::{
-    decl_event, decl_module, decl_storage, dispatch::Result, weights::SimpleDispatchInfo,
+    decl_event, decl_module, decl_storage, dispatch::Result, ensure, weights::SimpleDispatchInfo,
 };
 use system::ensure_signed;
 
-type Identifier = u32;
-
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
-pub enum Datagram<Header> {
+pub enum Datagram {
     ClientUpdate {
-        identifier: Identifier,
-        header: Header,
+        identifier: Vec<u8>,
+        header: generic::Header<u32, sp_runtime::traits::BlakeTwo256>, // TODO
     },
     ClientMisbehaviour {
-        identifier: Identifier,
+        identifier: Vec<u8>,
         evidence: Vec<u8>,
     },
 }
 
-#[derive(Encode, Decode, Default)]
-struct Client {
+#[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
+pub struct Client {
     client_state: Vec<u8>,
-    consensus_state: Vec<u8>,
+    pub consensus_state: ConsensusState,
     typ: u32,
+}
+
+#[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
+pub struct ConsensusState {
+    pub height: u32,
+    validity_predicate: Vec<u8>,
+    misbehaviour_predicate: Vec<u8>,
 }
 
 /// Our module's configuration trait. All our types and constants go in here. If the
@@ -80,22 +85,15 @@ decl_module! {
         /// This is just a simple example of how to interact with the module from the external
         /// world.
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn update_client(origin, id: u32, header: Vec<u8>) -> Result {
-            let _sender = ensure_signed(origin)?;
-            Ok(())
-        }
-
-        #[weight = SimpleDispatchInfo::FixedNormal(1000)]
         fn recv_packet(origin, packet: Vec<u8>, proof: Vec<Vec<u8>>, proof_height: T::BlockNumber) -> Result {
             let _sender = ensure_signed(origin)?;
             Ok(())
         }
 
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn submit_datagram(origin, datagram: Datagram<<T as system::Trait>::Header>) -> Result {
+        fn submit_datagram(origin, datagram: Datagram) -> Result {
             let _sender = ensure_signed(origin)?;
-            Self::handle_datagram(datagram);
-            Ok(())
+            Self::handle_datagram(datagram)
         }
 
         // The signature could also look like: `fn on_initialize()`.
@@ -128,19 +126,35 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client() {
+    pub fn create_client(identifier: Vec<u8>) {
         let client = Client {
             client_state: vec![],
-            consensus_state: vec![],
+            consensus_state: ConsensusState {
+                height: 0,
+                validity_predicate: vec![],
+                misbehaviour_predicate: vec![],
+            },
             typ: 0,
         };
-        Clients::insert(b"123".to_vec(), client);
-        Self::deposit_event(RawEvent::ClientCreated);
+        if !Clients::exists(&identifier) {
+            Clients::insert(&identifier, client);
+            Self::deposit_event(RawEvent::ClientCreated);
+        }
     }
 
-    pub fn handle_datagram<Header>(datagram: Datagram<Header>) {
+    pub fn handle_datagram(datagram: Datagram) -> Result {
         match datagram {
             Datagram::ClientUpdate { identifier, header } => {
+                ensure!(Clients::exists(&identifier), "Client not found");
+                let client = Clients::get(&identifier);
+                ensure!(
+                    client.consensus_state.height < header.number,
+                    "Client already updated"
+                );
+                // TODO: verify header using validity_predicate
+                Clients::mutate(&identifier, |client| {
+                    (*client).consensus_state.height = header.number;
+                });
                 Self::deposit_event(RawEvent::ClientUpdated);
             }
             Datagram::ClientMisbehaviour {
@@ -150,6 +164,7 @@ impl<T: Trait> Module<T> {
                 Self::deposit_event(RawEvent::ClientMisbehaviourReceived);
             }
         }
+        Ok(())
     }
 }
 
