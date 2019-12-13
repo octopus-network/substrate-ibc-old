@@ -11,8 +11,7 @@ support = { package = "frame-support", path = "../../../substrate/frame/support"
 system = { package = "frame-system", path = "../../../substrate/frame/system", default-features = false }
 balances = { package = "pallet-balances", path = "../../../substrate/frame/balances", default-features = false }
 sp-runtime = { path = "../../../substrate/primitives/runtime", default-features = false }
-rstd = { package = "sp-std", path = "../../../substrate/primitives/sr-std", default-features = false }
-runtime-io = { package = "sp-io", path = "../../../substrate/primitives/sr-io", default-features = false }
+sp-std = { path = "../../../substrate/primitives/std", default-features = false }
 
 [dev-dependencies]
 primitives = { package = "sp-core", path = "../../../substrate/primitives/core" }
@@ -26,6 +25,5 @@ std = [
 	"support/std",
 	"system/std",
 	"balances/std",
-	"runtime-io/std",
-	"rstd/std"
+	"sp-std/std"
 ]
