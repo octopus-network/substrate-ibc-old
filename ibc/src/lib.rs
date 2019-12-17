@@ -5,12 +5,12 @@ mod handler;
 mod routing;
 
 use codec::{Decode, Encode};
-use primitives::H256;
-use sp_runtime::{generic, RuntimeDebug};
-use sp_std::prelude::*;
-use support::{
+use frame_support::{
     decl_event, decl_module, decl_storage, dispatch::Result, ensure, weights::SimpleDispatchInfo,
 };
+use sp_core::H256;
+use sp_runtime::{generic, RuntimeDebug};
+use sp_std::prelude::*;
 use system::ensure_signed;
 
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
