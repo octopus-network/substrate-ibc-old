@@ -25,11 +25,36 @@ pub enum Datagram {
     },
 }
 
+#[derive(Encode, Decode)]
+pub enum ConnectionState {
+    None,
+    Init,
+    TryOpen,
+    Open,
+}
+
+impl Default for ConnectionState {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Default, Encode, Decode)]
+pub struct ConnectionEnd {
+    state: ConnectionState,
+    counterparty_connection_identifier: H256,
+    counterparty_prefix: Vec<u8>,
+    client_identifier: H256,
+    counterparty_client_identifier: H256,
+    version: Vec<u8>,
+}
+
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct Client {
     client_state: Vec<u8>,
     pub consensus_state: ConsensusState,
     typ: u32,
+    connections: Vec<H256>, // TODO: fixme! O(n)
 }
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
@@ -56,6 +81,7 @@ decl_storage! {
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
         Clients: map H256 => Client;
+        Connections: map H256 => ConnectionEnd;
     }
 }
 
@@ -71,6 +97,7 @@ decl_event!(
         ClientCreated,
         ClientUpdated,
         ClientMisbehaviourReceived,
+        ConnectionInit,
     }
 );
 
@@ -127,7 +154,11 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client(identifier: H256) {
+    pub fn create_client(identifier: H256) -> Result {
+        ensure!(
+            !Clients::exists(&identifier),
+            "Client identifier already exists"
+        );
         let client = Client {
             client_state: vec![],
             consensus_state: ConsensusState {
@@ -136,11 +167,45 @@ impl<T: Trait> Module<T> {
                 misbehaviour_predicate: vec![],
             },
             typ: 0,
+            connections: vec![],
         };
-        if !Clients::exists(&identifier) {
-            Clients::insert(&identifier, client);
-            Self::deposit_event(RawEvent::ClientCreated);
-        }
+        Clients::insert(&identifier, client);
+        Self::deposit_event(RawEvent::ClientCreated);
+        Ok(())
+    }
+
+    pub fn conn_open_init(
+        identifier: H256,
+        desired_counterparty_connection_identifier: H256,
+        client_identifier: H256,
+        counterparty_client_identifier: H256,
+    ) -> Result {
+        // abortTransactionUnless(validateConnectionIdentifier(identifier))
+        ensure!(
+            Clients::exists(&client_identifier),
+            "Client identifier not exists"
+        );
+        // TODO: ensure!(!client.connections.exists(&identifier)))
+        ensure!(
+            !Connections::exists(&identifier),
+            "Connection identifier already exists"
+        );
+        let connection_end = ConnectionEnd {
+            state: ConnectionState::Init,
+            counterparty_connection_identifier: desired_counterparty_connection_identifier,
+            counterparty_prefix: vec![],
+            client_identifier,
+            counterparty_client_identifier,
+            version: vec![], // getCompatibleVersions()
+        };
+
+        Connections::insert(&identifier, connection_end);
+        // addConnectionToClient(clientIdentifier, identifier)
+        Clients::mutate(&client_identifier, |client| {
+            (*client).connections.push(identifier);
+        });
+        Self::deposit_event(RawEvent::ConnectionInit);
+        Ok(())
     }
 
     pub fn handle_datagram(datagram: Datagram) -> Result {
