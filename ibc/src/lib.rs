@@ -5,6 +5,7 @@ mod handler;
 mod routing;
 
 use codec::{Decode, Encode};
+use primitives::H256;
 use sp_runtime::{generic, RuntimeDebug};
 use sp_std::prelude::*;
 use support::{
@@ -15,11 +16,11 @@ use system::ensure_signed;
 #[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
 pub enum Datagram {
     ClientUpdate {
-        identifier: Vec<u8>,
+        identifier: H256,
         header: generic::Header<u32, sp_runtime::traits::BlakeTwo256>, // TODO
     },
     ClientMisbehaviour {
-        identifier: Vec<u8>,
+        identifier: H256,
         evidence: Vec<u8>,
     },
 }
@@ -54,7 +55,7 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
-        Clients: map Vec<u8> => Client;
+        Clients: map H256 => Client;
     }
 }
 
@@ -126,7 +127,7 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client(identifier: Vec<u8>) {
+    pub fn create_client(identifier: H256) {
         let client = Client {
             client_state: vec![],
             consensus_state: ConsensusState {
