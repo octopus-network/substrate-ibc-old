@@ -6,7 +6,8 @@ mod routing;
 
 use codec::{Decode, Encode};
 use frame_support::{
-    decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure, weights::SimpleDispatchInfo,
+    decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
+    weights::SimpleDispatchInfo,
 };
 use sp_core::H256;
 use sp_runtime::{generic, RuntimeDebug};
@@ -25,7 +26,7 @@ pub enum Datagram {
     },
 }
 
-#[derive(Encode, Decode)]
+#[derive(Clone, Encode, Decode)]
 pub enum ConnectionState {
     None,
     Init,
@@ -39,7 +40,7 @@ impl Default for ConnectionState {
     }
 }
 
-#[derive(Default, Encode, Decode)]
+#[derive(Default, Clone, Encode, Decode)]
 pub struct ConnectionEnd {
     state: ConnectionState,
     counterparty_connection_identifier: H256,
@@ -54,7 +55,7 @@ pub struct Client {
     client_state: Vec<u8>,
     pub consensus_state: ConsensusState,
     typ: u32,
-    connections: Vec<H256>, // TODO: fixme! O(n)
+    pub connections: Vec<H256>, // TODO: fixme! O(n)
 }
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
