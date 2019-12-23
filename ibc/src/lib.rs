@@ -6,7 +6,7 @@ mod routing;
 
 use codec::{Decode, Encode};
 use frame_support::{
-    decl_event, decl_module, decl_storage, dispatch::Result, ensure, weights::SimpleDispatchInfo,
+    decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure, weights::SimpleDispatchInfo,
 };
 use sp_core::H256;
 use sp_runtime::{generic, RuntimeDebug};
@@ -113,13 +113,13 @@ decl_module! {
         /// This is just a simple example of how to interact with the module from the external
         /// world.
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn recv_packet(origin, packet: Vec<u8>, proof: Vec<Vec<u8>>, proof_height: T::BlockNumber) -> Result {
+        fn recv_packet(origin, packet: Vec<u8>, proof: Vec<Vec<u8>>, proof_height: T::BlockNumber) -> DispatchResult {
             let _sender = ensure_signed(origin)?;
             Ok(())
         }
 
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn submit_datagram(origin, datagram: Datagram) -> Result {
+        fn submit_datagram(origin, datagram: Datagram) -> DispatchResult {
             let _sender = ensure_signed(origin)?;
             Self::handle_datagram(datagram)
         }
@@ -154,7 +154,7 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client(identifier: H256) -> Result {
+    pub fn create_client(identifier: H256) -> DispatchResult {
         ensure!(
             !Clients::exists(&identifier),
             "Client identifier already exists"
@@ -179,7 +179,7 @@ impl<T: Trait> Module<T> {
         desired_counterparty_connection_identifier: H256,
         client_identifier: H256,
         counterparty_client_identifier: H256,
-    ) -> Result {
+    ) -> DispatchResult {
         // abortTransactionUnless(validateConnectionIdentifier(identifier))
         ensure!(
             Clients::exists(&client_identifier),
@@ -208,7 +208,7 @@ impl<T: Trait> Module<T> {
         Ok(())
     }
 
-    pub fn handle_datagram(datagram: Datagram) -> Result {
+    pub fn handle_datagram(datagram: Datagram) -> DispatchResult {
         match datagram {
             Datagram::ClientUpdate { identifier, header } => {
                 ensure!(Clients::exists(&identifier), "Client not found");
