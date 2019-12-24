@@ -24,9 +24,34 @@ pub enum Datagram {
         identifier: H256,
         evidence: Vec<u8>,
     },
+    ConnOpenTry {
+        desired_identifier: H256,
+        counterparty_connection_identifier: H256,
+        counterparty_client_identifier: H256,
+        client_identifier: H256,
+        version: Vec<u8>,
+        counterparty_version: Vec<u8>,
+        proof_init: Vec<u8>,
+        proof_consensus: Vec<u8>,
+        proof_height: u32,
+        consensus_height: u32,
+    },
+    ConnOpenAck {
+        identifier: H256,
+        version: Vec<u8>,
+        proof_try: Vec<u8>,
+        proof_consensus: Vec<u8>,
+        proof_height: u32,
+        consensus_height: u32,
+    },
+    ConnOpenConfirm {
+        identifier: H256,
+        proof_ack: Vec<u8>,
+        proof_height: u32,
+    },
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(PartialEq, Clone, Encode, Decode, RuntimeDebug)]
 pub enum ConnectionState {
     None,
     Init,
@@ -40,10 +65,10 @@ impl Default for ConnectionState {
     }
 }
 
-#[derive(Default, Clone, Encode, Decode)]
+#[derive(Default, Clone, Encode, Decode, RuntimeDebug)]
 pub struct ConnectionEnd {
-    state: ConnectionState,
-    counterparty_connection_identifier: H256,
+    pub state: ConnectionState,
+    pub counterparty_connection_identifier: H256,
     counterparty_prefix: Vec<u8>,
     client_identifier: H256,
     counterparty_client_identifier: H256,
@@ -99,6 +124,9 @@ decl_event!(
         ClientUpdated,
         ClientMisbehaviourReceived,
         ConnectionInit,
+        ConnOpenTryReceived,
+        ConnOpenAckReceived,
+        ConnOpenConfirmReceived,
     }
 );
 
@@ -113,12 +141,6 @@ decl_module! {
         /// This is your public interface. Be extremely careful.
         /// This is just a simple example of how to interact with the module from the external
         /// world.
-        #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn recv_packet(origin, packet: Vec<u8>, proof: Vec<Vec<u8>>, proof_height: T::BlockNumber) -> DispatchResult {
-            let _sender = ensure_signed(origin)?;
-            Ok(())
-        }
-
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
         fn submit_datagram(origin, datagram: Datagram) -> DispatchResult {
             let _sender = ensure_signed(origin)?;
@@ -229,6 +251,99 @@ impl<T: Trait> Module<T> {
                 evidence,
             } => {
                 Self::deposit_event(RawEvent::ClientMisbehaviourReceived);
+            }
+            Datagram::ConnOpenTry {
+                desired_identifier,
+                counterparty_connection_identifier,
+                counterparty_client_identifier,
+                client_identifier,
+                version,
+                counterparty_version,
+                proof_init,
+                proof_consensus,
+                proof_height,
+                consensus_height,
+            } => {
+                ensure!(Clients::exists(&client_identifier), "Client not found");
+                ensure!(
+                    !Connections::exists(&desired_identifier),
+                    "Connection identifier already exists"
+                );
+                // abortTransactionUnless(validateConnectionIdentifier(desiredIdentifier))
+                // abortTransactionUnless(consensusHeight <= getCurrentHeight())
+                // expectedConsensusState = getConsensusState(consensusHeight)
+                // expected = ConnectionEnd{INIT, desiredIdentifier, getCommitmentPrefix(), counterpartyClientIdentifier,
+                //                          clientIdentifier, counterpartyVersions}
+                // version = pickVersion(counterpartyVersions)
+                let connection = ConnectionEnd {
+                    state: ConnectionState::TryOpen,
+                    counterparty_connection_identifier,
+                    counterparty_prefix: vec![],
+                    client_identifier,
+                    counterparty_client_identifier,
+                    version: vec![],
+                };
+                // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofInit, counterpartyConnectionIdentifier, expected))
+                // abortTransactionUnless(connection.verifyClientConsensusState(proofHeight, proofConsensus, counterpartyClientIdentifier, expectedConsensusState))
+                // previous = provableStore.get(connectionPath(desiredIdentifier))
+                // abortTransactionUnless(
+                //   (previous === null) ||
+                //   (previous.state === INIT &&
+                //     previous.counterpartyConnectionIdentifier === counterpartyConnectionIdentifier &&
+                //     previous.counterpartyPrefix === counterpartyPrefix &&
+                //     previous.clientIdentifier === clientIdentifier &&
+                //     previous.counterpartyClientIdentifier === counterpartyClientIdentifier &&
+                //     previous.version === version))
+                let identifier = desired_identifier;
+                Connections::insert(&identifier, connection);
+                // addConnectionToClient(clientIdentifier, identifier)
+                Clients::mutate(&client_identifier, |client| {
+                    (*client).connections.push(identifier);
+                });
+                Self::deposit_event(RawEvent::ConnOpenTryReceived);
+            }
+            Datagram::ConnOpenAck {
+                identifier,
+                version,
+                proof_try,
+                proof_consensus,
+                proof_height,
+                consensus_height,
+            } => {
+                ensure!(Connections::exists(&identifier), "Connection not found");
+                // abortTransactionUnless(consensusHeight <= getCurrentHeight())
+                // connection = provableStore.get(connectionPath(identifier))
+                // abortTransactionUnless(connection.state === INIT || connection.state === TRYOPEN)
+                // expectedConsensusState = getConsensusState(consensusHeight)
+                // expected = ConnectionEnd{TRYOPEN, identifier, getCommitmentPrefix(),
+                //                          connection.counterpartyClientIdentifier, connection.clientIdentifier,
+                //                          version}
+                // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofTry, connection.counterpartyConnectionIdentifier, expected))
+                // abortTransactionUnless(connection.verifyClientConsensusState(proofHeight, proofConsensus, connection.counterpartyClientIdentifier, expectedConsensusState))
+                Connections::mutate(&identifier, |connection| {
+                    (*connection).state = ConnectionState::Open;
+                });
+                // abortTransactionUnless(getCompatibleVersions().indexOf(version) !== -1)
+                // connection.version = version
+                // provableStore.set(connectionPath(identifier), connection)
+                Self::deposit_event(RawEvent::ConnOpenAckReceived);
+            }
+            Datagram::ConnOpenConfirm {
+                identifier,
+                proof_ack,
+                proof_height,
+            } => {
+                ensure!(Connections::exists(&identifier), "Connection not found");
+                // connection = provableStore.get(connectionPath(identifier))
+                // abortTransactionUnless(connection.state === TRYOPEN)
+                // expected = ConnectionEnd{OPEN, identifier, getCommitmentPrefix(), connection.counterpartyClientIdentifier,
+                //                          connection.clientIdentifier, connection.version}
+                // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofAck, connection.counterpartyConnectionIdentifier, expected))
+                Connections::mutate(&identifier, |connection| {
+                    (*connection).state = ConnectionState::Open;
+                });
+                // provableStore.set(connectionPath(identifier), connection)
+                Self::deposit_event(RawEvent::ConnOpenConfirmReceived);
             }
         }
         Ok(())
