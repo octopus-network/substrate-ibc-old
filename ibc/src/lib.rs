@@ -108,6 +108,7 @@ decl_storage! {
         Something get(fn something): Option<u32>;
         Clients: map H256 => Client;
         Connections: map H256 => ConnectionEnd;
+        Ports: map Vec<u8> => u8;
     }
 }
 
@@ -127,6 +128,8 @@ decl_event!(
         ConnOpenTryReceived,
         ConnOpenAckReceived,
         ConnOpenConfirmReceived,
+        PortBound(u8),
+        PortReleased,
     }
 );
 
@@ -228,6 +231,27 @@ impl<T: Trait> Module<T> {
             (*client).connections.push(identifier);
         });
         Self::deposit_event(RawEvent::ConnectionInit);
+        Ok(())
+    }
+
+    pub fn bind_port(identifier: Vec<u8>, module_index: u8) -> DispatchResult {
+        // abortTransactionUnless(validatePortIdentifier(id))
+        ensure!(
+            !Ports::exists(&identifier),
+            "Port identifier already exists"
+        );
+        Ports::insert(&identifier, module_index);
+        Self::deposit_event(RawEvent::PortBound(module_index));
+        Ok(())
+    }
+
+    pub fn release_port(identifier: Vec<u8>, module_index: u8) -> DispatchResult {
+        ensure!(
+            !Ports::get(&identifier) == module_index,
+            "Port identifier not found"
+        );
+        Ports::remove(&identifier);
+        Self::deposit_event(RawEvent::PortReleased);
         Ok(())
     }
 
