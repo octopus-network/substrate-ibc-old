@@ -57,6 +57,7 @@ pub enum ConnectionState {
     Init,
     TryOpen,
     Open,
+    Closed,
 }
 
 impl Default for ConnectionState {
@@ -90,6 +91,43 @@ pub struct ConsensusState {
     misbehaviour_predicate: Vec<u8>,
 }
 
+#[derive(Encode, Decode)]
+enum ChannelState {
+    None,
+    Init,
+    TryOpen,
+    Open,
+    Closed,
+}
+
+impl Default for ChannelState {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Encode, Decode)]
+pub enum ChannelOrder {
+    Ordered,
+    Unordered,
+}
+
+impl Default for ChannelOrder {
+    fn default() -> Self {
+        Self::Ordered
+    }
+}
+
+#[derive(Default, Encode, Decode)]
+struct ChannelEnd {
+    state: ChannelState,
+    ordering: ChannelOrder,
+    counterparty_port_identifier: Vec<u8>,
+    counterparty_channel_identifier: H256,
+    connection_hops: Vec<H256>,
+    version: Vec<u8>,
+}
+
 /// Our module's configuration trait. All our types and constants go in here. If the
 /// module is dependent on specific other modules, then their configuration traits
 /// should be added to our implied traits list.
@@ -109,6 +147,7 @@ decl_storage! {
         Clients: map H256 => Client;
         Connections: map H256 => ConnectionEnd;
         Ports: map Vec<u8> => u8;
+        Channels: map (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
     }
 }
 
@@ -124,10 +163,11 @@ decl_event!(
         ClientCreated,
         ClientUpdated,
         ClientMisbehaviourReceived,
-        ConnectionInit,
+        ConnOpenInitReceived,
         ConnOpenTryReceived,
         ConnOpenAckReceived,
         ConnOpenConfirmReceived,
+        ChanOpenInitReceived,
         PortBound(u8),
         PortReleased,
     }
@@ -230,7 +270,7 @@ impl<T: Trait> Module<T> {
         Clients::mutate(&client_identifier, |client| {
             (*client).connections.push(identifier);
         });
-        Self::deposit_event(RawEvent::ConnectionInit);
+        Self::deposit_event(RawEvent::ConnOpenInitReceived);
         Ok(())
     }
 
@@ -252,6 +292,49 @@ impl<T: Trait> Module<T> {
         );
         Ports::remove(&identifier);
         Self::deposit_event(RawEvent::PortReleased);
+        Ok(())
+    }
+
+    pub fn chan_open_init(
+        order: ChannelOrder,
+        connection_hops: Vec<H256>,
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        counterparty_port_identifier: Vec<u8>,
+        counterparty_channel_identifier: H256,
+        version: Vec<u8>,
+    ) -> DispatchResult {
+        // abortTransactionUnless(validateChannelIdentifier(portIdentifier, channelIdentifier))
+        ensure!(
+            connection_hops.len() == 1,
+            "only allow 1 hop for v1 of the IBC protocol"
+        );
+
+        ensure!(
+            !Channels::exists((port_identifier, channel_identifier)),
+            "channel identifier already exists"
+        );
+        ensure!(
+            Connections::exists(&connection_hops[0]),
+            "connection identifier not exists"
+        );
+
+        // optimistic channel handshakes are allowed
+        let connection = Connections::get(&connection_hops[0]);
+        ensure!(
+            connection.state == ConnectionState::Closed,
+            "connection has been closed"
+        );
+        // abortTransactionUnless(authenticate(privateStore.get(portPath(portIdentifier))))
+        // channel = ChannelEnd{INIT, order, counterpartyPortIdentifier,
+        //                      counterpartyChannelIdentifier, connectionHops, version}
+        // provableStore.set(channelPath(portIdentifier, channelIdentifier), channel)
+        // key = generate()
+        // provableStore.set(channelCapabilityPath(portIdentifier, channelIdentifier), key)
+        // provableStore.set(nextSequenceSendPath(portIdentifier, channelIdentifier), 1)
+        // provableStore.set(nextSequenceRecvPath(portIdentifier, channelIdentifier), 1)
+        // return key
+        Self::deposit_event(RawEvent::ChanOpenInitReceived);
         Ok(())
     }
 
