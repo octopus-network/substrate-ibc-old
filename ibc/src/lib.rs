@@ -14,7 +14,7 @@ use sp_runtime::{generic, RuntimeDebug};
 use sp_std::prelude::*;
 use system::ensure_signed;
 
-#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug)]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub enum Datagram {
     ClientUpdate {
         identifier: H256,
@@ -51,7 +51,7 @@ pub enum Datagram {
     },
 }
 
-#[derive(PartialEq, Clone, Encode, Decode, RuntimeDebug)]
+#[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
 pub enum ConnectionState {
     None,
     Init,
@@ -66,7 +66,7 @@ impl Default for ConnectionState {
     }
 }
 
-#[derive(Default, Clone, Encode, Decode, RuntimeDebug)]
+#[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ConnectionEnd {
     pub state: ConnectionState,
     pub counterparty_connection_identifier: H256,
@@ -91,7 +91,7 @@ pub struct ConsensusState {
     misbehaviour_predicate: Vec<u8>,
 }
 
-#[derive(Encode, Decode)]
+#[derive(Clone, Encode, Decode, RuntimeDebug)]
 enum ChannelState {
     None,
     Init,
@@ -106,7 +106,7 @@ impl Default for ChannelState {
     }
 }
 
-#[derive(Encode, Decode)]
+#[derive(Clone, Encode, Decode, RuntimeDebug)]
 pub enum ChannelOrder {
     Ordered,
     Unordered,
@@ -118,8 +118,8 @@ impl Default for ChannelOrder {
     }
 }
 
-#[derive(Default, Encode, Decode)]
-struct ChannelEnd {
+#[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
+pub struct ChannelEnd {
     state: ChannelState,
     ordering: ChannelOrder,
     counterparty_port_identifier: Vec<u8>,
@@ -148,6 +148,8 @@ decl_storage! {
         Connections: map H256 => ConnectionEnd;
         Ports: map Vec<u8> => u8;
         Channels: map (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
+        NextSequenceSend: map(Vec<u8>, H256) => u32;
+        NextSequenceRecv: map(Vec<u8>, H256) => u32;
     }
 }
 
@@ -287,7 +289,7 @@ impl<T: Trait> Module<T> {
 
     pub fn release_port(identifier: Vec<u8>, module_index: u8) -> DispatchResult {
         ensure!(
-            !Ports::get(&identifier) == module_index,
+            Ports::get(&identifier) == module_index,
             "Port identifier not found"
         );
         Ports::remove(&identifier);
@@ -296,6 +298,7 @@ impl<T: Trait> Module<T> {
     }
 
     pub fn chan_open_init(
+        module_index: u8,
         order: ChannelOrder,
         connection_hops: Vec<H256>,
         port_identifier: Vec<u8>,
@@ -311,7 +314,7 @@ impl<T: Trait> Module<T> {
         );
 
         ensure!(
-            !Channels::exists((port_identifier, channel_identifier)),
+            !Channels::exists((port_identifier.clone(), channel_identifier)),
             "channel identifier already exists"
         );
         ensure!(
@@ -326,13 +329,23 @@ impl<T: Trait> Module<T> {
             "connection has been closed"
         );
         // abortTransactionUnless(authenticate(privateStore.get(portPath(portIdentifier))))
-        // channel = ChannelEnd{INIT, order, counterpartyPortIdentifier,
-        //                      counterpartyChannelIdentifier, connectionHops, version}
-        // provableStore.set(channelPath(portIdentifier, channelIdentifier), channel)
+        ensure!(
+            Ports::get(&port_identifier) == module_index,
+            "Port identifier not match"
+        );
+        let channel_end = ChannelEnd {
+            state: ChannelState::Init,
+            ordering: order,
+            counterparty_port_identifier,
+            counterparty_channel_identifier,
+            connection_hops,
+            version: vec![],
+        };
+        Channels::insert((port_identifier.clone(), channel_identifier), channel_end);
         // key = generate()
         // provableStore.set(channelCapabilityPath(portIdentifier, channelIdentifier), key)
-        // provableStore.set(nextSequenceSendPath(portIdentifier, channelIdentifier), 1)
-        // provableStore.set(nextSequenceRecvPath(portIdentifier, channelIdentifier), 1)
+        NextSequenceSend::insert((port_identifier.clone(), channel_identifier), 1);
+        NextSequenceRecv::insert((port_identifier, channel_identifier), 1);
         // return key
         Self::deposit_event(RawEvent::ChanOpenInitReceived);
         Ok(())
