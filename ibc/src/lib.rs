@@ -150,6 +150,7 @@ decl_storage! {
         Channels: map (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
         NextSequenceSend: map(Vec<u8>, H256) => u32;
         NextSequenceRecv: map(Vec<u8>, H256) => u32;
+        ChannelKeys: Vec<(Vec<u8>, H256)>; // TODO
     }
 }
 
@@ -325,7 +326,7 @@ impl<T: Trait> Module<T> {
         // optimistic channel handshakes are allowed
         let connection = Connections::get(&connection_hops[0]);
         ensure!(
-            connection.state == ConnectionState::Closed,
+            connection.state != ConnectionState::Closed,
             "connection has been closed"
         );
         // abortTransactionUnless(authenticate(privateStore.get(portPath(portIdentifier))))
@@ -345,8 +346,11 @@ impl<T: Trait> Module<T> {
         // key = generate()
         // provableStore.set(channelCapabilityPath(portIdentifier, channelIdentifier), key)
         NextSequenceSend::insert((port_identifier.clone(), channel_identifier), 1);
-        NextSequenceRecv::insert((port_identifier, channel_identifier), 1);
+        NextSequenceRecv::insert((port_identifier.clone(), channel_identifier), 1);
         // return key
+        ChannelKeys::mutate(|keys| {
+            (*keys).push((port_identifier.clone(), channel_identifier));
+        });
         Self::deposit_event(RawEvent::ChanOpenInitReceived);
         Ok(())
     }
