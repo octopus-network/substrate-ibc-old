@@ -49,6 +49,31 @@ pub enum Datagram {
         proof_ack: Vec<u8>,
         proof_height: u32,
     },
+    ChanOpenTry {
+        order: ChannelOrder,
+        connection_hops: Vec<H256>,
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        counterparty_port_identifier: Vec<u8>,
+        counterparty_channel_identifier: H256,
+        version: Vec<u8>,
+        counterparty_version: Vec<u8>,
+        proof_init: Vec<u8>,
+        proof_height: u32,
+    },
+    ChanOpenAck {
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        version: Vec<u8>,
+        proof_try: Vec<u8>,
+        proof_height: u32,
+    },
+    ChanOpenConfirm {
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        proof_ack: Vec<u8>,
+        proof_height: u32,
+    },
 }
 
 #[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
@@ -91,8 +116,8 @@ pub struct ConsensusState {
     misbehaviour_predicate: Vec<u8>,
 }
 
-#[derive(Clone, Encode, Decode, RuntimeDebug)]
-enum ChannelState {
+#[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
+pub enum ChannelState {
     None,
     Init,
     TryOpen,
@@ -106,7 +131,7 @@ impl Default for ChannelState {
     }
 }
 
-#[derive(Clone, Encode, Decode, RuntimeDebug)]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub enum ChannelOrder {
     Ordered,
     Unordered,
@@ -120,12 +145,12 @@ impl Default for ChannelOrder {
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ChannelEnd {
-    state: ChannelState,
-    ordering: ChannelOrder,
-    counterparty_port_identifier: Vec<u8>,
-    counterparty_channel_identifier: H256,
-    connection_hops: Vec<H256>,
-    version: Vec<u8>,
+    pub state: ChannelState,
+    pub ordering: ChannelOrder,
+    pub counterparty_port_identifier: Vec<u8>,
+    pub counterparty_channel_identifier: H256,
+    pub connection_hops: Vec<H256>,
+    pub version: Vec<u8>,
 }
 
 /// Our module's configuration trait. All our types and constants go in here. If the
@@ -170,9 +195,12 @@ decl_event!(
         ConnOpenTryReceived,
         ConnOpenAckReceived,
         ConnOpenConfirmReceived,
-        ChanOpenInitReceived,
         PortBound(u8),
         PortReleased,
+        ChanOpenInitReceived,
+        ChanOpenTryReceived,
+        ChanOpenAckReceived,
+        ChanOpenConfirmReceived,
     }
 );
 
@@ -468,6 +496,156 @@ impl<T: Trait> Module<T> {
                 });
                 // provableStore.set(connectionPath(identifier), connection)
                 Self::deposit_event(RawEvent::ConnOpenConfirmReceived);
+            }
+            Datagram::ChanOpenTry {
+                order,
+                connection_hops,
+                port_identifier,
+                channel_identifier,
+                counterparty_port_identifier,
+                counterparty_channel_identifier,
+                version,
+                counterparty_version,
+                proof_init,
+                proof_height,
+            } => {
+                // abortTransactionUnless(validateChannelIdentifier(portIdentifier, channelIdentifier))
+                ensure!(
+                    connection_hops.len() == 1,
+                    "only allow 1 hop for v1 of the IBC protocol"
+                );
+                // ???
+                // previous = provableStore.get(channelPath(portIdentifier, channelIdentifier))
+                // abortTransactionUnless(
+                //   (previous === null) ||
+                //   (previous.state === INIT &&
+                //    previous.order === order &&
+                //    previous.counterpartyPortIdentifier === counterpartyPortIdentifier &&
+                //    previous.counterpartyChannelIdentifier === counterpartyChannelIdentifier &&
+                //    previous.connectionHops === connectionHops &&
+                //    previous.version === version)
+                //   )
+                ensure!(
+                    !Channels::exists((port_identifier.clone(), channel_identifier)),
+                    "channel identifier already exists"
+                );
+                // abortTransactionUnless(authenticate(privateStore.get(portPath(portIdentifier))))
+                ensure!(
+                    Connections::exists(&connection_hops[0]),
+                    "connection identifier not exists"
+                );
+                let connection = Connections::get(&connection_hops[0]);
+                ensure!(
+                    connection.state == ConnectionState::Open,
+                    "connection has been closed"
+                );
+                // expected = ChannelEnd{INIT, order, portIdentifier,
+                //                       channelIdentifier, connectionHops.reverse(), counterpartyVersion}
+                // abortTransactionUnless(connection.verifyChannelState(
+                //   proofHeight,
+                //   proofInit,
+                //   counterpartyPortIdentifier,
+                //   counterpartyChannelIdentifier,
+                //   expected
+                // ))
+                let channel_end = ChannelEnd {
+                    state: ChannelState::TryOpen,
+                    ordering: order,
+                    counterparty_port_identifier,
+                    counterparty_channel_identifier,
+                    connection_hops,
+                    version,
+                };
+                Channels::insert((port_identifier.clone(), channel_identifier), channel_end);
+                // key = generate()
+                // provableStore.set(channelCapabilityPath(portIdentifier, channelIdentifier), key)
+                NextSequenceSend::insert((port_identifier.clone(), channel_identifier), 1);
+                NextSequenceRecv::insert((port_identifier.clone(), channel_identifier), 1);
+                // return key
+                ChannelKeys::mutate(|keys| {
+                    (*keys).push((port_identifier.clone(), channel_identifier));
+                });
+                Self::deposit_event(RawEvent::ChanOpenTryReceived);
+            }
+            Datagram::ChanOpenAck {
+                port_identifier,
+                channel_identifier,
+                version,
+                proof_try,
+                proof_height,
+            } => {
+                ensure!(
+                    Channels::exists((port_identifier.clone(), channel_identifier)),
+                    "channel identifier not exists"
+                );
+                let channel = Channels::get((port_identifier.clone(), channel_identifier));
+                ensure!(
+                    channel.state == ChannelState::Init || channel.state == ChannelState::TryOpen,
+                    "channel is not ready"
+                );
+                // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(portIdentifier, channelIdentifier))))
+                ensure!(
+                    Connections::exists(&channel.connection_hops[0]),
+                    "connection identifier not exists"
+                );
+                let connection = Connections::get(&channel.connection_hops[0]);
+                ensure!(
+                    connection.state == ConnectionState::Open,
+                    "connection has been closed"
+                );
+                // expected = ChannelEnd{TRYOPEN, channel.order, portIdentifier,
+                //                       channelIdentifier, channel.connectionHops.reverse(), counterpartyVersion}
+                // abortTransactionUnless(connection.verifyChannelState(
+                //   proofHeight,
+                //   proofTry,
+                //   channel.counterpartyPortIdentifier,
+                //   channel.counterpartyChannelIdentifier,
+                //   expected
+                // ))
+                // channel.version = counterpartyVersion
+                Channels::mutate((port_identifier, channel_identifier), |channel| {
+                    (*channel).state = ChannelState::Open;
+                });
+                Self::deposit_event(RawEvent::ChanOpenAckReceived);
+            }
+            Datagram::ChanOpenConfirm {
+                port_identifier,
+                channel_identifier,
+                proof_ack,
+                proof_height,
+            } => {
+                ensure!(
+                    Channels::exists((port_identifier.clone(), channel_identifier)),
+                    "channel identifier not exists"
+                );
+                let channel = Channels::get((port_identifier.clone(), channel_identifier));
+                ensure!(
+                    channel.state == ChannelState::TryOpen,
+                    "channel is not ready"
+                );
+                // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(portIdentifier, channelIdentifier))))
+                ensure!(
+                    Connections::exists(&channel.connection_hops[0]),
+                    "connection identifier not exists"
+                );
+                let connection = Connections::get(&channel.connection_hops[0]);
+                ensure!(
+                    connection.state == ConnectionState::Open,
+                    "connection has been closed"
+                );
+                // expected = ChannelEnd{OPEN, channel.order, portIdentifier,
+                //                       channelIdentifier, channel.connectionHops.reverse(), channel.version}
+                // abortTransactionUnless(connection.verifyChannelState(
+                //   proofHeight,
+                //   proofAck,
+                //   channel.counterpartyPortIdentifier,
+                //   channel.counterpartyChannelIdentifier,
+                //   expected
+                // ))
+                Channels::mutate((port_identifier, channel_identifier), |channel| {
+                    (*channel).state = ChannelState::Open;
+                });
+                Self::deposit_event(RawEvent::ChanOpenConfirmReceived);
             }
         }
         Ok(())
