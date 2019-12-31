@@ -14,6 +14,16 @@ use sp_runtime::{generic, RuntimeDebug};
 use sp_std::prelude::*;
 use system::ensure_signed;
 
+pub struct Packet {
+    pub sequence: u64,
+    pub timeout_height: u32,
+    pub source_port: Vec<u8>,
+    pub source_channel: H256,
+    pub dest_port: Vec<u8>,
+    pub dest_channel: H256,
+    pub data: Vec<u8>,
+}
+
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub enum Datagram {
     ClientUpdate {
@@ -173,8 +183,8 @@ decl_storage! {
         Connections: map H256 => ConnectionEnd;
         Ports: map Vec<u8> => u8;
         Channels: map (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
-        NextSequenceSend: map(Vec<u8>, H256) => u32;
-        NextSequenceRecv: map(Vec<u8>, H256) => u32;
+        NextSequenceSend: map(Vec<u8>, H256) => u64;
+        NextSequenceRecv: map(Vec<u8>, H256) => u64;
         ChannelKeys: Vec<(Vec<u8>, H256)>; // TODO
     }
 }
@@ -201,6 +211,8 @@ decl_event!(
         ChanOpenTryReceived,
         ChanOpenAckReceived,
         ChanOpenConfirmReceived,
+        SendPacket(u64, Vec<u8>, u32),
+        RecvPacket,
     }
 );
 
@@ -380,6 +392,56 @@ impl<T: Trait> Module<T> {
             (*keys).push((port_identifier.clone(), channel_identifier));
         });
         Self::deposit_event(RawEvent::ChanOpenInitReceived);
+        Ok(())
+    }
+
+    pub fn send_packet(packet: Packet) -> DispatchResult {
+        let channel = Channels::get((packet.source_port.clone(), packet.source_channel));
+        // optimistic sends are permitted once the handshake has started
+        ensure!(
+            channel.state != ChannelState::Closed,
+            "channel has been closed"
+        );
+
+        // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(packet.sourcePort, packet.sourceChannel))))
+        ensure!(
+            packet.dest_port == channel.counterparty_port_identifier,
+            "port not match"
+        );
+        ensure!(
+            packet.dest_channel == channel.counterparty_channel_identifier,
+            "channel not match"
+        );
+        let connection = Connections::get(&channel.connection_hops[0]);
+        ensure!(
+            connection.state != ConnectionState::Closed,
+            "connection has been closed"
+        );
+
+        // consensusState = provableStore.get(consensusStatePath(connection.clientIdentifier))
+        // abortTransactionUnless(consensusState.getHeight() < packet.timeoutHeight)
+
+        let mut next_sequence_send =
+            NextSequenceSend::get((packet.source_port.clone(), packet.source_channel));
+        ensure!(
+            packet.sequence == next_sequence_send,
+            "send sequence not match"
+        );
+
+        // all assertions passed, we can alter state
+        next_sequence_send = next_sequence_send + 1;
+        NextSequenceSend::insert(
+            (packet.source_port.clone(), packet.source_channel),
+            next_sequence_send,
+        );
+        // provableStore.set(packetCommitmentPath(packet.sourcePort, packet.sourceChannel, packet.sequence), hash(packet.data, packet.timeout))
+
+        // log that a packet has been sent
+        Self::deposit_event(RawEvent::SendPacket(
+            packet.sequence,
+            packet.data,
+            packet.timeout_height,
+        ));
         Ok(())
     }
 
