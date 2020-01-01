@@ -14,6 +14,7 @@ use sp_runtime::{generic, RuntimeDebug};
 use sp_std::prelude::*;
 use system::ensure_signed;
 
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub struct Packet {
     pub sequence: u64,
     pub timeout_height: u32,
@@ -82,6 +83,17 @@ pub enum Datagram {
         port_identifier: Vec<u8>,
         channel_identifier: H256,
         proof_ack: Vec<u8>,
+        proof_height: u32,
+    },
+    PacketRecv {
+        packet: Packet,
+        proof: Vec<u8>,
+        proof_height: u32,
+    },
+    PacketAcknowledgement {
+        packet: Packet,
+        acknowledgement: Vec<u8>,
+        proof: Vec<u8>,
         proof_height: u32,
     },
 }
@@ -211,8 +223,10 @@ decl_event!(
         ChanOpenTryReceived,
         ChanOpenAckReceived,
         ChanOpenConfirmReceived,
-        SendPacket(u64, Vec<u8>, u32),
-        RecvPacket,
+        SendPacket(u64, Vec<u8>, u32, Vec<u8>, H256, Vec<u8>, H256),
+        RecvPacket(u64, Vec<u8>, u32, Vec<u8>, H256, Vec<u8>, H256),
+        PacketRecvReceived,
+        PacketAcknowledgementReceived,
     }
 );
 
@@ -441,6 +455,10 @@ impl<T: Trait> Module<T> {
             packet.sequence,
             packet.data,
             packet.timeout_height,
+            packet.source_port,
+            packet.source_channel,
+            packet.dest_port,
+            packet.dest_channel,
         ));
         Ok(())
     }
@@ -709,6 +727,91 @@ impl<T: Trait> Module<T> {
                 });
                 Self::deposit_event(RawEvent::ChanOpenConfirmReceived);
             }
+            Datagram::PacketRecv {
+                packet,
+                proof,
+                proof_height,
+            } => {
+                ensure!(
+                    Channels::exists((packet.dest_port.clone(), packet.dest_channel)),
+                    "channel identifier not exists"
+                );
+                let channel = Channels::get((packet.dest_port.clone(), packet.dest_channel));
+                ensure!(channel.state == ChannelState::Open, "channel is not ready");
+                // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(packet.destPort, packet.destChannel))))
+                ensure!(
+                    packet.source_port == channel.counterparty_port_identifier,
+                    "source port not match"
+                );
+                ensure!(
+                    packet.source_channel == channel.counterparty_channel_identifier,
+                    "source channel not match"
+                );
+
+                ensure!(
+                    Connections::exists(&channel.connection_hops[0]),
+                    "connection identifier not exists"
+                );
+                let connection = Connections::get(&channel.connection_hops[0]);
+                ensure!(
+                    connection.state == ConnectionState::Open,
+                    "connection has been closed"
+                );
+
+                // abortTransactionUnless(getConsensusHeight() < packet.timeoutHeight)
+
+                // abortTransactionUnless(connection.verifyPacketCommitment(
+                //   proofHeight,
+                //   proof,
+                //   packet.sourcePort,
+                //   packet.sourceChannel,
+                //   packet.sequence,
+                //   hash(packet.data, packet.timeout)
+                // ))
+
+                // all assertions passed (except sequence check), we can alter state
+
+                // if (acknowledgement.length > 0 || channel.order === UNORDERED)
+                //   provableStore.set(
+                //     packetAcknowledgementPath(packet.destPort, packet.destChannel, packet.sequence),
+                //     hash(acknowledgement)
+                //   )
+
+                if channel.ordering == ChannelOrder::Ordered {
+                    let mut next_sequence_recv =
+                        NextSequenceRecv::get((packet.dest_port.clone(), packet.dest_channel));
+                    ensure!(
+                        packet.sequence == next_sequence_recv,
+                        "recv sequence not match"
+                    );
+                    next_sequence_recv = next_sequence_recv + 1;
+                    NextSequenceRecv::insert(
+                        (packet.dest_port.clone(), packet.dest_channel),
+                        next_sequence_recv,
+                    );
+                }
+
+                // log that a packet has been received & acknowledged
+                // emitLogEntry("recvPacket", {sequence: packet.sequence, timeout: packet.timeout, data: packet.data, acknowledgement})
+                Self::deposit_event(RawEvent::RecvPacket(
+                    packet.sequence,
+                    packet.data,
+                    packet.timeout_height,
+                    packet.source_port,
+                    packet.source_channel,
+                    packet.dest_port,
+                    packet.dest_channel,
+                ));
+
+                // return transparent packet
+                // return packet
+            }
+            Datagram::PacketAcknowledgement {
+                packet,
+                acknowledgement,
+                proof,
+                proof_height,
+            } => {}
         }
         Ok(())
     }
