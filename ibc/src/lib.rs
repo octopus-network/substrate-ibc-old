@@ -811,7 +811,56 @@ impl<T: Trait> Module<T> {
                 acknowledgement,
                 proof,
                 proof_height,
-            } => {}
+            } => {
+                // abort transaction unless that channel is open, calling module owns the associated port, and the packet fields match
+                ensure!(
+                    Channels::exists((packet.source_port.clone(), packet.source_channel)),
+                    "channel identifier not exists"
+                );
+                let channel = Channels::get((packet.source_port.clone(), packet.source_channel));
+                ensure!(channel.state == ChannelState::Open, "channel is not ready");
+                // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(packet.sourcePort, packet.sourceChannel))))
+                ensure!(
+                    packet.source_channel == channel.counterparty_channel_identifier,
+                    "source channel not match"
+                );
+
+                ensure!(
+                    Connections::exists(&channel.connection_hops[0]),
+                    "connection identifier not exists"
+                );
+                let connection = Connections::get(&channel.connection_hops[0]);
+                ensure!(
+                    connection.state == ConnectionState::Open,
+                    "connection has been closed"
+                );
+                ensure!(
+                    packet.source_port == channel.counterparty_port_identifier,
+                    "source port not match"
+                );
+
+                // verify we sent the packet and haven't cleared it out yet
+                // abortTransactionUnless(provableStore.get(packetCommitmentPath(packet.sourcePort, packet.sourceChannel, packet.sequence))
+                //        === hash(packet.data, packet.timeout))
+
+                // abort transaction unless correct acknowledgement on counterparty chain
+                // abortTransactionUnless(connection.verifyPacketAcknowledgement(
+                //   proofHeight,
+                //   proof,
+                //   packet.destPort,
+                //   packet.destChannel,
+                //   packet.sequence,
+                //   hash(acknowledgement)
+                // ))
+
+                // all assertions passed, we can alter state
+
+                // delete our commitment so we can't "acknowledge" again
+                // provableStore.delete(packetCommitmentPath(packet.sourcePort, packet.sourceChannel, packet.sequence))
+
+                // return transparent packet
+                // return packet
+            }
         }
         Ok(())
     }
