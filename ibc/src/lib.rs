@@ -191,12 +191,12 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
-        Clients: map H256 => Client;
-        Connections: map H256 => ConnectionEnd;
-        Ports: map Vec<u8> => u8;
-        Channels: map (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
-        NextSequenceSend: map(Vec<u8>, H256) => u64;
-        NextSequenceRecv: map(Vec<u8>, H256) => u64;
+        Clients: map hasher(blake2_256) H256 => Client;
+        Connections: map hasher(blake2_256) H256 => ConnectionEnd;
+        Ports: map hasher(blake2_256) Vec<u8> => u8;
+        Channels: map hasher(blake2_256) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
+        NextSequenceSend: map hasher(blake2_256) (Vec<u8>, H256) => u64;
+        NextSequenceRecv: map hasher(blake2_256) (Vec<u8>, H256) => u64;
         ChannelKeys: Vec<(Vec<u8>, H256)>; // TODO
     }
 }
