@@ -279,7 +279,7 @@ decl_module! {
 impl<T: Trait> Module<T> {
     pub fn create_client(identifier: H256) -> DispatchResult {
         ensure!(
-            !Clients::exists(&identifier),
+            !Clients::contains_key(&identifier),
             "Client identifier already exists"
         );
         let client = Client {
@@ -305,12 +305,12 @@ impl<T: Trait> Module<T> {
     ) -> DispatchResult {
         // abortTransactionUnless(validateConnectionIdentifier(identifier))
         ensure!(
-            Clients::exists(&client_identifier),
+            Clients::contains_key(&client_identifier),
             "Client identifier not exists"
         );
         // TODO: ensure!(!client.connections.exists(&identifier)))
         ensure!(
-            !Connections::exists(&identifier),
+            !Connections::contains_key(&identifier),
             "Connection identifier already exists"
         );
         let connection_end = ConnectionEnd {
@@ -334,7 +334,7 @@ impl<T: Trait> Module<T> {
     pub fn bind_port(identifier: Vec<u8>, module_index: u8) -> DispatchResult {
         // abortTransactionUnless(validatePortIdentifier(id))
         ensure!(
-            !Ports::exists(&identifier),
+            !Ports::contains_key(&identifier),
             "Port identifier already exists"
         );
         Ports::insert(&identifier, module_index);
@@ -369,11 +369,11 @@ impl<T: Trait> Module<T> {
         );
 
         ensure!(
-            !Channels::exists((port_identifier.clone(), channel_identifier)),
+            !Channels::contains_key((port_identifier.clone(), channel_identifier)),
             "channel identifier already exists"
         );
         ensure!(
-            Connections::exists(&connection_hops[0]),
+            Connections::contains_key(&connection_hops[0]),
             "connection identifier not exists"
         );
 
@@ -466,7 +466,7 @@ impl<T: Trait> Module<T> {
     pub fn handle_datagram(datagram: Datagram) -> DispatchResult {
         match datagram {
             Datagram::ClientUpdate { identifier, header } => {
-                ensure!(Clients::exists(&identifier), "Client not found");
+                ensure!(Clients::contains_key(&identifier), "Client not found");
                 let client = Clients::get(&identifier);
                 ensure!(
                     client.consensus_state.height < header.number,
@@ -496,9 +496,12 @@ impl<T: Trait> Module<T> {
                 proof_height,
                 consensus_height,
             } => {
-                ensure!(Clients::exists(&client_identifier), "Client not found");
                 ensure!(
-                    !Connections::exists(&desired_identifier),
+                    Clients::contains_key(&client_identifier),
+                    "Client not found"
+                );
+                ensure!(
+                    !Connections::contains_key(&desired_identifier),
                     "Connection identifier already exists"
                 );
                 // abortTransactionUnless(validateConnectionIdentifier(desiredIdentifier))
@@ -542,7 +545,10 @@ impl<T: Trait> Module<T> {
                 proof_height,
                 consensus_height,
             } => {
-                ensure!(Connections::exists(&identifier), "Connection not found");
+                ensure!(
+                    Connections::contains_key(&identifier),
+                    "Connection not found"
+                );
                 // abortTransactionUnless(consensusHeight <= getCurrentHeight())
                 // connection = provableStore.get(connectionPath(identifier))
                 // abortTransactionUnless(connection.state === INIT || connection.state === TRYOPEN)
@@ -565,7 +571,10 @@ impl<T: Trait> Module<T> {
                 proof_ack,
                 proof_height,
             } => {
-                ensure!(Connections::exists(&identifier), "Connection not found");
+                ensure!(
+                    Connections::contains_key(&identifier),
+                    "Connection not found"
+                );
                 // connection = provableStore.get(connectionPath(identifier))
                 // abortTransactionUnless(connection.state === TRYOPEN)
                 // expected = ConnectionEnd{OPEN, identifier, getCommitmentPrefix(), connection.counterpartyClientIdentifier,
@@ -606,12 +615,12 @@ impl<T: Trait> Module<T> {
                 //    previous.version === version)
                 //   )
                 ensure!(
-                    !Channels::exists((port_identifier.clone(), channel_identifier)),
+                    !Channels::contains_key((port_identifier.clone(), channel_identifier)),
                     "channel identifier already exists"
                 );
                 // abortTransactionUnless(authenticate(privateStore.get(portPath(portIdentifier))))
                 ensure!(
-                    Connections::exists(&connection_hops[0]),
+                    Connections::contains_key(&connection_hops[0]),
                     "connection identifier not exists"
                 );
                 let connection = Connections::get(&connection_hops[0]);
@@ -655,7 +664,7 @@ impl<T: Trait> Module<T> {
                 proof_height,
             } => {
                 ensure!(
-                    Channels::exists((port_identifier.clone(), channel_identifier)),
+                    Channels::contains_key((port_identifier.clone(), channel_identifier)),
                     "channel identifier not exists"
                 );
                 let channel = Channels::get((port_identifier.clone(), channel_identifier));
@@ -665,7 +674,7 @@ impl<T: Trait> Module<T> {
                 );
                 // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(portIdentifier, channelIdentifier))))
                 ensure!(
-                    Connections::exists(&channel.connection_hops[0]),
+                    Connections::contains_key(&channel.connection_hops[0]),
                     "connection identifier not exists"
                 );
                 let connection = Connections::get(&channel.connection_hops[0]);
@@ -695,7 +704,7 @@ impl<T: Trait> Module<T> {
                 proof_height,
             } => {
                 ensure!(
-                    Channels::exists((port_identifier.clone(), channel_identifier)),
+                    Channels::contains_key((port_identifier.clone(), channel_identifier)),
                     "channel identifier not exists"
                 );
                 let channel = Channels::get((port_identifier.clone(), channel_identifier));
@@ -705,7 +714,7 @@ impl<T: Trait> Module<T> {
                 );
                 // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(portIdentifier, channelIdentifier))))
                 ensure!(
-                    Connections::exists(&channel.connection_hops[0]),
+                    Connections::contains_key(&channel.connection_hops[0]),
                     "connection identifier not exists"
                 );
                 let connection = Connections::get(&channel.connection_hops[0]);
@@ -733,7 +742,7 @@ impl<T: Trait> Module<T> {
                 proof_height,
             } => {
                 ensure!(
-                    Channels::exists((packet.dest_port.clone(), packet.dest_channel)),
+                    Channels::contains_key((packet.dest_port.clone(), packet.dest_channel)),
                     "channel identifier not exists"
                 );
                 let channel = Channels::get((packet.dest_port.clone(), packet.dest_channel));
@@ -749,7 +758,7 @@ impl<T: Trait> Module<T> {
                 );
 
                 ensure!(
-                    Connections::exists(&channel.connection_hops[0]),
+                    Connections::contains_key(&channel.connection_hops[0]),
                     "connection identifier not exists"
                 );
                 let connection = Connections::get(&channel.connection_hops[0]);
@@ -814,7 +823,7 @@ impl<T: Trait> Module<T> {
             } => {
                 // abort transaction unless that channel is open, calling module owns the associated port, and the packet fields match
                 ensure!(
-                    Channels::exists((packet.source_port.clone(), packet.source_channel)),
+                    Channels::contains_key((packet.source_port.clone(), packet.source_channel)),
                     "channel identifier not exists"
                 );
                 let channel = Channels::get((packet.source_port.clone(), packet.source_channel));
@@ -826,7 +835,7 @@ impl<T: Trait> Module<T> {
                 );
 
                 ensure!(
-                    Connections::exists(&channel.connection_hops[0]),
+                    Connections::contains_key(&channel.connection_hops[0]),
                     "connection identifier not exists"
                 );
                 let connection = Connections::get(&channel.connection_hops[0]);
