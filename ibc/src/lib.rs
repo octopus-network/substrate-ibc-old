@@ -10,6 +10,7 @@ use frame_support::{
     weights::SimpleDispatchInfo,
 };
 use sp_core::H256;
+use sp_finality_grandpa::AuthorityList;
 use sp_runtime::{generic, RuntimeDebug};
 use sp_std::prelude::*;
 use system::ensure_signed;
@@ -136,6 +137,7 @@ pub struct ConsensusState {
     pub height: u32,
     validity_predicate: Vec<u8>,
     misbehaviour_predicate: Vec<u8>,
+    authority_list: AuthorityList,
 }
 
 #[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
@@ -277,7 +279,7 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client(identifier: H256) -> DispatchResult {
+    pub fn create_client(identifier: H256, authority_list: AuthorityList) -> DispatchResult {
         ensure!(
             !Clients::contains_key(&identifier),
             "Client identifier already exists"
@@ -288,6 +290,7 @@ impl<T: Trait> Module<T> {
                 height: 0,
                 validity_predicate: vec![],
                 misbehaviour_predicate: vec![],
+                authority_list,
             },
             typ: 0,
             connections: vec![],

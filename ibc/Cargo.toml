@@ -10,9 +10,10 @@ codec = { package = "parity-scale-codec", version = "1.0.0", default-features = 
 frame-support = { path = "../../../substrate/frame/support", default-features = false }
 system = { package = "frame-system", path = "../../../substrate/frame/system", default-features = false }
 balances = { package = "pallet-balances", path = "../../../substrate/frame/balances", default-features = false }
+sp-core = { path = "../../../substrate/primitives/core", default-features = false }
+sp-finality-grandpa = { path = "../../../substrate/primitives/finality-grandpa", default-features = false }
 sp-runtime = { path = "../../../substrate/primitives/runtime", default-features = false }
 sp-std = { path = "../../../substrate/primitives/std", default-features = false }
-sp-core = { path = "../../../substrate/primitives/core", default-features = false }
 
 [features]
 default = ["std"]
@@ -24,5 +25,6 @@ std = [
 	"system/std",
 	"balances/std",
 	"sp-std/std",
+	"sp-finality-grandpa/std",
 	"sp-core/std"
 ]
