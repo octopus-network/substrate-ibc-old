@@ -6,14 +6,30 @@ mod routing;
 
 use codec::{Decode, Encode};
 use frame_support::{
-    decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
+    debug, decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
     weights::SimpleDispatchInfo,
 };
 use sp_core::H256;
 use sp_finality_grandpa::AuthorityList;
+use sp_finality_grandpa::{AuthorityId, AuthoritySignature};
+use sp_runtime::traits::{Block as BlockT, NumberFor};
 use sp_runtime::{generic, RuntimeDebug};
 use sp_std::prelude::*;
 use system::ensure_signed;
+
+type Commit<Block> = finality_grandpa::Commit<
+    <Block as BlockT>::Hash,
+    NumberFor<Block>,
+    AuthoritySignature,
+    AuthorityId,
+>;
+
+#[derive(Encode, Decode, RuntimeDebug)]
+pub struct GrandpaJustification<Block: BlockT> {
+    round: u64,
+    commit: Commit<Block>,
+    votes_ancestries: Vec<Block::Header>,
+}
 
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub struct Packet {
@@ -31,6 +47,7 @@ pub enum Datagram {
     ClientUpdate {
         identifier: H256,
         header: generic::Header<u32, sp_runtime::traits::BlakeTwo256>, // TODO
+        justification: Vec<u8>,
     },
     ClientMisbehaviour {
         identifier: H256,
@@ -185,6 +202,7 @@ pub struct ChannelEnd {
 pub trait Trait: system::Trait {
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+    type Block: BlockT;
 }
 
 decl_storage! {
@@ -245,6 +263,7 @@ decl_module! {
         /// world.
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
         fn submit_datagram(origin, datagram: Datagram) -> DispatchResult {
+            debug::RuntimeLogger::init();
             let _sender = ensure_signed(origin)?;
             Self::handle_datagram(datagram)
         }
@@ -468,13 +487,19 @@ impl<T: Trait> Module<T> {
 
     pub fn handle_datagram(datagram: Datagram) -> DispatchResult {
         match datagram {
-            Datagram::ClientUpdate { identifier, header } => {
+            Datagram::ClientUpdate {
+                identifier,
+                header,
+                justification,
+            } => {
                 ensure!(Clients::contains_key(&identifier), "Client not found");
                 let client = Clients::get(&identifier);
                 ensure!(
                     client.consensus_state.height < header.number,
                     "Client already updated"
                 );
+                let justification = GrandpaJustification::<T::Block>::decode(&mut &*justification);
+                debug::native::print!("recv justification: {:?}", justification);
                 // TODO: verify header using validity_predicate
                 Clients::mutate(&identifier, |client| {
                     (*client).consensus_state.height = header.number;
