@@ -2,6 +2,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod handler;
+mod justification;
 mod routing;
 
 use codec::{Decode, Encode};
@@ -10,26 +11,10 @@ use frame_support::{
     weights::SimpleDispatchInfo,
 };
 use sp_core::H256;
-use sp_finality_grandpa::AuthorityList;
-use sp_finality_grandpa::{AuthorityId, AuthoritySignature};
-use sp_runtime::traits::{Block as BlockT, NumberFor};
-use sp_runtime::{generic, RuntimeDebug};
+use sp_finality_grandpa::{AuthorityList, SetId};
+use sp_runtime::{generic, traits::Block as BlockT, RuntimeDebug};
 use sp_std::prelude::*;
 use system::ensure_signed;
-
-type Commit<Block> = finality_grandpa::Commit<
-    <Block as BlockT>::Hash,
-    NumberFor<Block>,
-    AuthoritySignature,
-    AuthorityId,
->;
-
-#[derive(Encode, Decode, RuntimeDebug)]
-pub struct GrandpaJustification<Block: BlockT> {
-    round: u64,
-    commit: Commit<Block>,
-    votes_ancestries: Vec<Block::Header>,
-}
 
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub struct Packet {
@@ -151,10 +136,11 @@ pub struct Client {
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ConsensusState {
-    pub height: u32,
+    pub height: u32, // last finalized block
     validity_predicate: Vec<u8>,
     misbehaviour_predicate: Vec<u8>,
-    authority_list: AuthorityList,
+    set_id: SetId,
+    authorities: AuthorityList,
 }
 
 #[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
@@ -252,7 +238,8 @@ decl_event!(
 
 decl_module! {
     // Simple declaration of the `Module` type. Lets the macro know what its working on.
-    pub struct Module<T: Trait> for enum Call where origin: T::Origin {
+    pub struct Module<T: Trait> for enum Call where origin: T::Origin
+    {
         /// Deposit one of this module's events by using the default implementation.
         /// It is also possible to provide a custom implementation.
         /// For non-generic events, the generic parameter just needs to be dropped, so that it
@@ -262,7 +249,8 @@ decl_module! {
         /// This is just a simple example of how to interact with the module from the external
         /// world.
         #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn submit_datagram(origin, datagram: Datagram) -> DispatchResult {
+        fn submit_datagram(origin, datagram: Datagram) -> DispatchResult
+        {
             debug::RuntimeLogger::init();
             let _sender = ensure_signed(origin)?;
             Self::handle_datagram(datagram)
@@ -298,7 +286,7 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client(identifier: H256, authority_list: AuthorityList) -> DispatchResult {
+    pub fn create_client(identifier: H256, authorities: AuthorityList) -> DispatchResult {
         ensure!(
             !Clients::contains_key(&identifier),
             "Client identifier already exists"
@@ -309,7 +297,8 @@ impl<T: Trait> Module<T> {
                 height: 0,
                 validity_predicate: vec![],
                 misbehaviour_predicate: vec![],
-                authority_list,
+                set_id: 0,
+                authorities,
             },
             typ: 0,
             connections: vec![],
@@ -498,9 +487,14 @@ impl<T: Trait> Module<T> {
                     client.consensus_state.height < header.number,
                     "Client already updated"
                 );
-                let justification = GrandpaJustification::<T::Block>::decode(&mut &*justification);
+                let justification =
+                    justification::GrandpaJustification::<T::Block>::decode(&mut &*justification);
                 debug::native::print!("recv justification: {:?}", justification);
                 // TODO: verify header using validity_predicate
+                // let result = justification.unwrap().verify(
+                //     client.consensus_state.set_id,
+                //     &client.consensus_state.authorities.iter().cloned().collect(),
+                // );
                 Clients::mutate(&identifier, |client| {
                     (*client).consensus_state.height = header.number;
                 });
