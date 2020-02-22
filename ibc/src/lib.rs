@@ -12,9 +12,15 @@ use frame_support::{
 };
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId};
-use sp_runtime::{generic, traits::Block as BlockT, RuntimeDebug};
+use sp_runtime::{
+    generic, traits::BlakeTwo256, OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
+};
 use sp_std::prelude::*;
 use system::ensure_signed;
+
+type BlockNumber = u32;
+type Header = generic::Header<BlockNumber, BlakeTwo256>;
+type Block = generic::Block<Header, UncheckedExtrinsic>;
 
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub struct Packet {
@@ -31,7 +37,7 @@ pub struct Packet {
 pub enum Datagram {
     ClientUpdate {
         identifier: H256,
-        header: generic::Header<u32, sp_runtime::traits::BlakeTwo256>, // TODO
+        header: Header,
         justification: Vec<u8>,
     },
     ClientMisbehaviour {
@@ -188,7 +194,6 @@ pub struct ChannelEnd {
 pub trait Trait: system::Trait {
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
-    type Block: BlockT;
 }
 
 decl_storage! {
@@ -487,18 +492,27 @@ impl<T: Trait> Module<T> {
                     client.consensus_state.height < header.number,
                     "Client already updated"
                 );
-                let justification =
-                    justification::GrandpaJustification::<T::Block>::decode(&mut &*justification);
-                debug::native::print!("recv justification: {:?}", justification);
                 // TODO: verify header using validity_predicate
-                // let result = justification.unwrap().verify(
-                //     client.consensus_state.set_id,
-                //     &client.consensus_state.authorities.iter().cloned().collect(),
-                // );
-                Clients::mutate(&identifier, |client| {
-                    (*client).consensus_state.height = header.number;
-                });
-                Self::deposit_event(RawEvent::ClientUpdated);
+                let justification =
+                    justification::GrandpaJustification::<Block>::decode(&mut &*justification);
+                debug::native::print!(
+                    "consensus_state: {:?}, justification: {:?}",
+                    client.consensus_state,
+                    justification
+                );
+                if let Ok(justification) = justification {
+                    let result = justification.verify(
+                        client.consensus_state.set_id,
+                        &client.consensus_state.authorities.iter().cloned().collect(),
+                    );
+                    debug::native::print!("verify result: {:?}", result);
+                    if result.is_ok() {
+                        Clients::mutate(&identifier, |client| {
+                            (*client).consensus_state.height = header.number;
+                        });
+                        Self::deposit_event(RawEvent::ClientUpdated);
+                    }
+                }
             }
             Datagram::ClientMisbehaviour {
                 identifier,
