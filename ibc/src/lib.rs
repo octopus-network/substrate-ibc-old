@@ -40,6 +40,7 @@ pub enum Datagram {
         header: Header,
         justification: Vec<u8>,
         new_authorities: Option<AuthorityList>,
+        authorities_proof: Option<Vec<Vec<u8>>>,
     },
     ClientMisbehaviour {
         identifier: H256,
@@ -487,6 +488,7 @@ impl<T: Trait> Module<T> {
                 header,
                 justification,
                 new_authorities,
+                authorities_proof,
             } => {
                 ensure!(Clients::contains_key(&identifier), "Client not found");
                 let client = Clients::get(&identifier);
@@ -498,10 +500,11 @@ impl<T: Trait> Module<T> {
                 let justification =
                     justification::GrandpaJustification::<Block>::decode(&mut &*justification);
                 debug::native::print!(
-                    "consensus_state: {:?}, justification: {:?}, new_authorities: {:?}",
+                    "consensus_state: {:?}, justification: {:?}, new_authorities: {:?}, authorities_proof: {:?}",
                     client.consensus_state,
                     justification,
                     new_authorities,
+                    authorities_proof,
                 );
                 if let Ok(justification) = justification {
                     let result = justification.verify(
