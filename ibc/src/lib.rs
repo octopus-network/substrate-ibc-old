@@ -10,11 +10,12 @@ use frame_support::{
     debug, decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
     weights::SimpleDispatchInfo,
 };
-use sp_core::H256;
-use sp_finality_grandpa::{AuthorityList, SetId};
+use sp_core::{Blake2Hasher, H256};
+use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
 use sp_runtime::{
     generic, traits::BlakeTwo256, OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
 };
+use sp_state_machine::{read_proof_check, StorageProof};
 use sp_std::prelude::*;
 use system::ensure_signed;
 
@@ -39,8 +40,7 @@ pub enum Datagram {
         identifier: H256,
         header: Header,
         justification: Vec<u8>,
-        new_authorities: Option<AuthorityList>,
-        authorities_proof: Option<Vec<Vec<u8>>>,
+        authorities_proof: Vec<Vec<u8>>,
     },
     ClientMisbehaviour {
         identifier: H256,
@@ -204,6 +204,7 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
+        StateRoots: map hasher(blake2_256) u32 => H256;
         Clients: map hasher(blake2_256) H256 => Client;
         Connections: map hasher(blake2_256) H256 => ConnectionEnd;
         Ports: map hasher(blake2_256) Vec<u8> => u8;
@@ -487,7 +488,6 @@ impl<T: Trait> Module<T> {
                 identifier,
                 header,
                 justification,
-                new_authorities,
                 authorities_proof,
             } => {
                 ensure!(Clients::contains_key(&identifier), "Client not found");
@@ -500,10 +500,9 @@ impl<T: Trait> Module<T> {
                 let justification =
                     justification::GrandpaJustification::<Block>::decode(&mut &*justification);
                 debug::native::print!(
-                    "consensus_state: {:?}, justification: {:?}, new_authorities: {:?}, authorities_proof: {:?}",
+                    "consensus_state: {:?}, justification: {:?}, authorities_proof: {:?}",
                     client.consensus_state,
                     justification,
-                    new_authorities,
                     authorities_proof,
                 );
                 if let Ok(justification) = justification {
@@ -516,6 +515,24 @@ impl<T: Trait> Module<T> {
                         Clients::mutate(&identifier, |client| {
                             (*client).consensus_state.height = header.number;
                         });
+                        StateRoots::insert(header.number, header.state_root);
+                        // test
+                        let local_result1 = read_proof_check::<Blake2Hasher, _>(
+                            header.state_root,
+                            StorageProof::new(authorities_proof),
+                            &[GRANDPA_AUTHORITIES_KEY.to_vec()],
+                        )
+                        .unwrap();
+                        debug::native::print!(">>>>>>>>>>>>>: {:?}", local_result1);
+                        let na1 = local_result1
+                            .get(&GRANDPA_AUTHORITIES_KEY.to_vec())
+                            .unwrap();
+                        debug::native::print!("+++++++++++++: {:?}", na1);
+                        let na2 = na1.clone().unwrap();
+                        let new_auth: AuthorityList =
+                            VersionedAuthorityList::decode(&mut &*na2).unwrap().into();
+                        debug::native::print!("+++++++++++++: {:?}", new_auth);
+                        // end test
                         Self::deposit_event(RawEvent::ClientUpdated);
                     }
                 }
