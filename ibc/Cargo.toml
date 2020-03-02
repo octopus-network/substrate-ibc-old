@@ -14,8 +14,9 @@ sp-core = { path = "../../../substrate/primitives/core", default-features = fals
 sp-finality-grandpa = { path = "../../../substrate/primitives/finality-grandpa", default-features = false }
 sp-runtime = { path = "../../../substrate/primitives/runtime", default-features = false }
 sp-std = { path = "../../../substrate/primitives/std", default-features = false }
-sp-state-machine = { path = "../../../substrate/primitives/state-machine", default-features = false }
 finality-grandpa = { version = "0.11.1", features = ["derive-codec"], default-features = false }
+hash-db = { version = "0.15.2", default-features = false }
+sp-trie = { path = "../../../substrate/primitives/trie", default-features = false }
 
 [features]
 default = ["std"]
@@ -29,5 +30,7 @@ std = [
 	"sp-std/std",
 	"sp-finality-grandpa/std",
 	"finality-grandpa/std",
-	"sp-core/std"
+	"sp-core/std",
+	"hash-db/std",
+	"sp-trie/std",
 ]

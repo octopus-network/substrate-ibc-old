@@ -4,6 +4,7 @@
 mod handler;
 mod justification;
 mod routing;
+mod state_machine;
 
 use codec::{Decode, Encode};
 use frame_support::{
@@ -15,8 +16,8 @@ use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_
 use sp_runtime::{
     generic, traits::BlakeTwo256, OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
 };
-use sp_state_machine::{read_proof_check, StorageProof};
 use sp_std::prelude::*;
+use state_machine::{read_proof_check, StorageProof};
 use system::ensure_signed;
 
 type BlockNumber = u32;
@@ -516,23 +517,18 @@ impl<T: Trait> Module<T> {
                             (*client).consensus_state.height = header.number;
                         });
                         StateRoots::insert(header.number, header.state_root);
-                        // test
-                        let local_result1 = read_proof_check::<Blake2Hasher, _>(
+                        let result = read_proof_check::<Blake2Hasher>(
                             header.state_root,
                             StorageProof::new(authorities_proof),
-                            &[GRANDPA_AUTHORITIES_KEY.to_vec()],
-                        )
-                        .unwrap();
-                        debug::native::print!(">>>>>>>>>>>>>: {:?}", local_result1);
-                        let na1 = local_result1
-                            .get(&GRANDPA_AUTHORITIES_KEY.to_vec())
-                            .unwrap();
-                        debug::native::print!("+++++++++++++: {:?}", na1);
-                        let na2 = na1.clone().unwrap();
-                        let new_auth: AuthorityList =
-                            VersionedAuthorityList::decode(&mut &*na2).unwrap().into();
-                        debug::native::print!("+++++++++++++: {:?}", new_auth);
-                        // end test
+                            &GRANDPA_AUTHORITIES_KEY.to_vec(),
+                        );
+                        // TODO
+                        let result = result.unwrap().unwrap();
+                        let new_authorities: AuthorityList =
+                            VersionedAuthorityList::decode(&mut &*result)
+                                .unwrap()
+                                .into();
+                        debug::native::print!("new_authorities: {:?}", new_authorities);
                         Self::deposit_event(RawEvent::ClientUpdated);
                     }
                 }
