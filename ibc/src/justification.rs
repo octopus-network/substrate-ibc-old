@@ -22,7 +22,7 @@ type Commit<Block> = finality_grandpa::Commit<
 #[derive(Encode, Decode, RuntimeDebug)]
 pub struct GrandpaJustification<Block: BlockT> {
     round: u64,
-    commit: Commit<Block>,
+    pub commit: Commit<Block>,
     votes_ancestries: Vec<Block::Header>,
 }
 

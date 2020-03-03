@@ -137,7 +137,6 @@ pub struct ConnectionEnd {
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct Client {
-    client_state: Vec<u8>,
     pub consensus_state: ConsensusState,
     typ: u32,
     pub connections: Vec<H256>, // TODO: fixme! O(n)
@@ -205,7 +204,7 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
-        StateRoots: map hasher(blake2_256) u32 => H256;
+        VerifiedRoots: map hasher(blake2_256) u32 => H256;
         Clients: map hasher(blake2_256) H256 => Client;
         Connections: map hasher(blake2_256) H256 => ConnectionEnd;
         Ports: map hasher(blake2_256) Vec<u8> => u8;
@@ -301,7 +300,6 @@ impl<T: Trait> Module<T> {
             "Client identifier already exists"
         );
         let client = Client {
-            client_state: vec![],
             consensus_state: ConsensusState {
                 height: 0,
                 validity_predicate: vec![],
@@ -501,8 +499,9 @@ impl<T: Trait> Module<T> {
                 let justification =
                     justification::GrandpaJustification::<Block>::decode(&mut &*justification);
                 debug::native::print!(
-                    "consensus_state: {:?}, justification: {:?}, authorities_proof: {:?}",
+                    "consensus_state: {:?}, header: {:?}, justification: {:?}, authorities_proof: {:?}",
                     client.consensus_state,
+                    header,
                     justification,
                     authorities_proof,
                 );
@@ -513,10 +512,13 @@ impl<T: Trait> Module<T> {
                     );
                     debug::native::print!("verify result: {:?}", result);
                     if result.is_ok() {
+                        let block_hash = header.hash();
+                        debug::native::print!("block_hash: {:?}", block_hash);
+                        assert_eq!(block_hash, justification.commit.target_hash);
                         Clients::mutate(&identifier, |client| {
                             (*client).consensus_state.height = header.number;
                         });
-                        StateRoots::insert(header.number, header.state_root);
+                        VerifiedRoots::insert(header.number, header.state_root);
                         let result = read_proof_check::<Blake2Hasher>(
                             header.state_root,
                             StorageProof::new(authorities_proof),
@@ -529,6 +531,12 @@ impl<T: Trait> Module<T> {
                                 .unwrap()
                                 .into();
                         debug::native::print!("new_authorities: {:?}", new_authorities);
+                        if new_authorities != client.consensus_state.authorities {
+                            Clients::mutate(&identifier, |client| {
+                                (*client).consensus_state.set_id += 1;
+                                (*client).consensus_state.authorities = new_authorities;
+                            });
+                        }
                         Self::deposit_event(RawEvent::ClientUpdated);
                     }
                 }
