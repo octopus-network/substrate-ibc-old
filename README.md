@@ -1,7 +1,4 @@
-# frame
-A collection of frames (a.k.a. pallet, paint, srml ...) used by Cdot.
-
-## pallet-ibc (work in progress)
+# pallet-ibc (work in progress)
 pallet-ibc is a substrate pallet which implements the standard [IBC protocol](https://github.com/cosmos/ics).</br>
 
 The goal of this pallet is to allow the blockchains built on Substrate to gain the ability to cross-chain using IBC protocol, even interoperate with those chains built by Cosmos SDK.</br>
