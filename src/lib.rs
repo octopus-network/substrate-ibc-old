@@ -136,19 +136,20 @@ pub struct ConnectionEnd {
 }
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
-pub struct Client {
-    pub consensus_state: ConsensusState,
+pub struct ClientState {
     typ: u32,
+    frozen: bool,
+    pub latest_height: u32,
     pub connections: Vec<H256>, // TODO: fixme! O(n)
 }
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ConsensusState {
-    pub height: u32, // last finalized block
     validity_predicate: Vec<u8>,
     misbehaviour_predicate: Vec<u8>,
     set_id: SetId,
     authorities: AuthorityList,
+    commitment_root: H256,
 }
 
 #[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
@@ -204,8 +205,8 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
-        VerifiedRoots: map hasher(blake2_256) u32 => H256;
-        Clients: map hasher(blake2_256) H256 => Client;
+        Clients: map hasher(blake2_256) H256 => ClientState; // client_indentifier => ClientState
+        ConsensusStates: map hasher(blake2_256) (H256, u32) => ConsensusState; // (client_identifier, height) => ConsensusState
         Connections: map hasher(blake2_256) H256 => ConnectionEnd;
         Ports: map hasher(blake2_256) Vec<u8> => u8;
         Channels: map hasher(blake2_256) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
@@ -294,23 +295,34 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    pub fn create_client(identifier: H256, authorities: AuthorityList) -> DispatchResult {
+    pub fn create_client(
+        identifier: H256,
+        height: u32,
+        commitment_root: H256,
+        set_id: SetId,
+        authorities: AuthorityList,
+    ) -> DispatchResult {
         ensure!(
             !Clients::contains_key(&identifier),
             "Client identifier already exists"
         );
-        let client = Client {
-            consensus_state: ConsensusState {
-                height: 0,
-                validity_predicate: vec![],
-                misbehaviour_predicate: vec![],
-                set_id: 0,
-                authorities,
-            },
+
+        let client_state = ClientState {
             typ: 0,
+            frozen: false,
+            latest_height: height, // TODO
             connections: vec![],
         };
-        Clients::insert(&identifier, client);
+        Clients::insert(&identifier, client_state);
+
+        let consensus_state = ConsensusState {
+            validity_predicate: vec![],
+            misbehaviour_predicate: vec![],
+            set_id,
+            authorities,
+            commitment_root,
+        };
+        ConsensusStates::insert((identifier, height), consensus_state);
         Self::deposit_event(RawEvent::ClientCreated);
         Ok(())
     }
@@ -342,8 +354,8 @@ impl<T: Trait> Module<T> {
 
         Connections::insert(&identifier, connection_end);
         // addConnectionToClient(clientIdentifier, identifier)
-        Clients::mutate(&client_identifier, |client| {
-            (*client).connections.push(identifier);
+        Clients::mutate(&client_identifier, |client_state| {
+            (*client_state).connections.push(identifier);
         });
         Self::deposit_event(RawEvent::ConnOpenInitReceived);
         Ok(())
@@ -490,35 +502,49 @@ impl<T: Trait> Module<T> {
                 authorities_proof,
             } => {
                 ensure!(Clients::contains_key(&identifier), "Client not found");
-                let client = Clients::get(&identifier);
+                let client_state = Clients::get(&identifier);
                 ensure!(
-                    client.consensus_state.height < header.number,
+                    client_state.latest_height < header.number,
                     "Client already updated"
                 );
+                ensure!(
+                    ConsensusStates::contains_key((identifier, client_state.latest_height)),
+                    "ConsensusState not found"
+                );
+                let consensus_state =
+                    ConsensusStates::get((identifier, client_state.latest_height));
                 // TODO: verify header using validity_predicate
                 let justification =
                     justification::GrandpaJustification::<Block>::decode(&mut &*justification);
                 debug::native::print!(
                     "consensus_state: {:?}, header: {:?}, justification: {:?}, authorities_proof: {:?}",
-                    client.consensus_state,
+                    consensus_state,
                     header,
                     justification,
                     authorities_proof,
                 );
                 if let Ok(justification) = justification {
                     let result = justification.verify(
-                        client.consensus_state.set_id,
-                        &client.consensus_state.authorities.iter().cloned().collect(),
+                        consensus_state.set_id,
+                        &consensus_state.authorities.iter().cloned().collect(),
                     );
                     debug::native::print!("verify result: {:?}", result);
                     if result.is_ok() {
                         let block_hash = header.hash();
                         debug::native::print!("block_hash: {:?}", block_hash);
                         assert_eq!(block_hash, justification.commit.target_hash);
-                        Clients::mutate(&identifier, |client| {
-                            (*client).consensus_state.height = header.number;
+                        Clients::mutate(&identifier, |client_state| {
+                            (*client_state).latest_height = header.number;
                         });
-                        VerifiedRoots::insert(header.number, header.state_root);
+                        let new_consensus_state = ConsensusState {
+                            validity_predicate: vec![],
+                            misbehaviour_predicate: vec![],
+                            set_id: consensus_state.set_id,
+                            authorities: consensus_state.authorities.clone(),
+                            commitment_root: header.state_root,
+                        };
+                        ConsensusStates::insert((identifier, header.number), new_consensus_state);
+
                         let result = read_proof_check::<Blake2Hasher>(
                             header.state_root,
                             StorageProof::new(authorities_proof),
@@ -531,11 +557,14 @@ impl<T: Trait> Module<T> {
                                 .unwrap()
                                 .into();
                         debug::native::print!("new_authorities: {:?}", new_authorities);
-                        if new_authorities != client.consensus_state.authorities {
-                            Clients::mutate(&identifier, |client| {
-                                (*client).consensus_state.set_id += 1;
-                                (*client).consensus_state.authorities = new_authorities;
-                            });
+                        if new_authorities != consensus_state.authorities {
+                            ConsensusStates::mutate(
+                                (identifier, header.number),
+                                |consensus_state| {
+                                    (*consensus_state).set_id += 1;
+                                    (*consensus_state).authorities = new_authorities;
+                                },
+                            );
                         }
                         Self::deposit_event(RawEvent::ClientUpdated);
                     }
@@ -595,8 +624,8 @@ impl<T: Trait> Module<T> {
                 let identifier = desired_identifier;
                 Connections::insert(&identifier, connection);
                 // addConnectionToClient(clientIdentifier, identifier)
-                Clients::mutate(&client_identifier, |client| {
-                    (*client).connections.push(identifier);
+                Clients::mutate(&client_identifier, |client_state| {
+                    (*client_state).connections.push(identifier);
                 });
                 Self::deposit_event(RawEvent::ConnOpenTryReceived);
             }
