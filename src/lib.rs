@@ -11,7 +11,7 @@ use frame_support::{
     debug, decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
     weights::SimpleDispatchInfo,
 };
-use sp_core::{Blake2Hasher, H256};
+use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
 use sp_runtime::{
     generic, traits::BlakeTwo256, OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
@@ -205,9 +205,11 @@ decl_storage! {
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
-        Clients: map hasher(blake2_256) H256 => ClientState; // client_indentifier => ClientState
+
+        Clients: map hasher(blake2_256) H256 => ClientState; // client_identifier => ClientState
         ConsensusStates: map hasher(blake2_256) (H256, u32) => ConsensusState; // (client_identifier, height) => ConsensusState
-        Connections: map hasher(blake2_256) H256 => ConnectionEnd;
+        Connections: map hasher(blake2_256) H256 => ConnectionEnd; // connection_identifier => ConnectionEnd
+
         Ports: map hasher(blake2_256) Vec<u8> => u8;
         Channels: map hasher(blake2_256) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
         NextSequenceSend: map hasher(blake2_256) (Vec<u8>, H256) => u64;
@@ -310,7 +312,7 @@ impl<T: Trait> Module<T> {
         let client_state = ClientState {
             typ: 0,
             frozen: false,
-            latest_height: height, // TODO
+            latest_height: height,
             connections: vec![],
         };
         Clients::insert(&identifier, client_state);
@@ -545,7 +547,7 @@ impl<T: Trait> Module<T> {
                         };
                         ConsensusStates::insert((identifier, header.number), new_consensus_state);
 
-                        let result = read_proof_check::<Blake2Hasher>(
+                        let result = read_proof_check::<BlakeTwo256>(
                             header.state_root,
                             StorageProof::new(authorities_proof),
                             &GRANDPA_AUTHORITIES_KEY.to_vec(),
