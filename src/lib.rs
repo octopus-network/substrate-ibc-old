@@ -54,8 +54,8 @@ pub enum Datagram {
         client_identifier: H256,
         version: Vec<u8>,
         counterparty_version: Vec<u8>,
-        proof_init: Vec<u8>,
-        proof_consensus: Vec<u8>,
+        proof_init: Vec<Vec<u8>>,
+        proof_consensus: Vec<Vec<u8>>,
         proof_height: u32,
         consensus_height: u32,
     },
@@ -354,6 +354,7 @@ impl<T: Trait> Module<T> {
             version: vec![], // getCompatibleVersions()
         };
 
+        debug::native::print!("connection inserted: {:?}", identifier);
         Connections::insert(&identifier, connection_end);
         // addConnectionToClient(clientIdentifier, identifier)
         Clients::mutate(&client_identifier, |client_state| {
@@ -545,6 +546,11 @@ impl<T: Trait> Module<T> {
                             authorities: consensus_state.authorities.clone(),
                             commitment_root: header.state_root,
                         };
+                        debug::native::print!(
+                            "consensus_state inserted: {:?}, {}",
+                            identifier,
+                            header.number
+                        );
                         ConsensusStates::insert((identifier, header.number), new_consensus_state);
 
                         let result = read_proof_check::<BlakeTwo256>(
@@ -612,6 +618,36 @@ impl<T: Trait> Module<T> {
                     counterparty_client_identifier,
                     version: vec![],
                 };
+                debug::native::print!(
+                    "query consensus_state: {:?}, {}",
+                    client_identifier,
+                    proof_height
+                );
+                ensure!(
+                    ConsensusStates::contains_key((client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let consensus_state = ConsensusStates::get((client_identifier, proof_height));
+                let key = Connections::hashed_key_for(counterparty_connection_identifier);
+                debug::native::print!(
+                    "commitment_root: {:?}, counterparty_connection_identifier: {:?}, key: {:?}",
+                    consensus_state.commitment_root,
+                    counterparty_connection_identifier,
+                    key
+                );
+                let result = read_proof_check::<BlakeTwo256>(
+                    consensus_state.commitment_root,
+                    StorageProof::new(proof_init),
+                    &key,
+                );
+                let result = result.unwrap().unwrap();
+                let connection_end = ConnectionEnd::decode(&mut &*result).unwrap();
+                debug::native::print!(
+                    "connecion_end: {:?}, counterparty_connection_identifier: {:?}",
+                    connection_end,
+                    counterparty_connection_identifier
+                );
+
                 // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofInit, counterpartyConnectionIdentifier, expected))
                 // abortTransactionUnless(connection.verifyClientConsensusState(proofHeight, proofConsensus, counterpartyClientIdentifier, expectedConsensusState))
                 // previous = provableStore.get(connectionPath(desiredIdentifier))
