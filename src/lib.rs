@@ -21,8 +21,7 @@ use state_machine::{read_proof_check, StorageProof};
 use system::ensure_signed;
 
 type BlockNumber = u32;
-type Header = generic::Header<BlockNumber, BlakeTwo256>;
-type Block = generic::Block<Header, UncheckedExtrinsic>;
+type Block = generic::Block<generic::Header<BlockNumber, BlakeTwo256>, UncheckedExtrinsic>;
 
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
 pub struct Packet {
@@ -40,8 +39,6 @@ pub enum Datagram {
     ClientUpdate {
         identifier: H256,
         header: Header,
-        justification: Vec<u8>,
-        authorities_proof: Vec<Vec<u8>>,
     },
     ClientMisbehaviour {
         identifier: H256,
@@ -137,7 +134,6 @@ pub struct ConnectionEnd {
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ClientState {
-    typ: u32,
     frozen: bool,
     pub latest_height: u32,
     pub connections: Vec<H256>, // TODO: fixme! O(n)
@@ -145,11 +141,18 @@ pub struct ClientState {
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ConsensusState {
-    validity_predicate: Vec<u8>,
-    misbehaviour_predicate: Vec<u8>,
     set_id: SetId,
     authorities: AuthorityList,
     commitment_root: H256,
+}
+
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
+pub struct Header {
+    pub height: u32,
+    pub block_hash: H256,
+    pub commitment_root: H256,
+    pub justification: Vec<u8>,
+    pub authorities_proof: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
@@ -206,14 +209,14 @@ decl_storage! {
     trait Store for Module<T: Trait> as Ibc {
         Something get(fn something): Option<u32>;
 
-        Clients: map hasher(blake2_256) H256 => ClientState; // client_identifier => ClientState
-        ConsensusStates: map hasher(blake2_256) (H256, u32) => ConsensusState; // (client_identifier, height) => ConsensusState
-        Connections: map hasher(blake2_256) H256 => ConnectionEnd; // connection_identifier => ConnectionEnd
+        Clients: map hasher(blake2_128_concat) H256 => ClientState; // client_identifier => ClientState
+        ConsensusStates: map hasher(blake2_128_concat) (H256, u32) => ConsensusState; // (client_identifier, height) => ConsensusState
+        Connections: map hasher(blake2_128_concat) H256 => ConnectionEnd; // connection_identifier => ConnectionEnd
 
-        Ports: map hasher(blake2_256) Vec<u8> => u8;
-        Channels: map hasher(blake2_256) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
-        NextSequenceSend: map hasher(blake2_256) (Vec<u8>, H256) => u64;
-        NextSequenceRecv: map hasher(blake2_256) (Vec<u8>, H256) => u64;
+        Ports: map hasher(blake2_128_concat) Vec<u8> => u8;
+        Channels: map hasher(blake2_128_concat) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
+        NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64;
+        NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64;
         ChannelKeys: Vec<(Vec<u8>, H256)>; // TODO
     }
 }
@@ -310,7 +313,6 @@ impl<T: Trait> Module<T> {
         );
 
         let client_state = ClientState {
-            typ: 0,
             frozen: false,
             latest_height: height,
             connections: vec![],
@@ -318,8 +320,6 @@ impl<T: Trait> Module<T> {
         Clients::insert(&identifier, client_state);
 
         let consensus_state = ConsensusState {
-            validity_predicate: vec![],
-            misbehaviour_predicate: vec![],
             set_id,
             authorities,
             commitment_root,
@@ -498,16 +498,11 @@ impl<T: Trait> Module<T> {
 
     pub fn handle_datagram(datagram: Datagram) -> DispatchResult {
         match datagram {
-            Datagram::ClientUpdate {
-                identifier,
-                header,
-                justification,
-                authorities_proof,
-            } => {
+            Datagram::ClientUpdate { identifier, header } => {
                 ensure!(Clients::contains_key(&identifier), "Client not found");
                 let client_state = Clients::get(&identifier);
                 ensure!(
-                    client_state.latest_height < header.number,
+                    client_state.latest_height < header.height,
                     "Client already updated"
                 );
                 ensure!(
@@ -517,14 +512,13 @@ impl<T: Trait> Module<T> {
                 let consensus_state =
                     ConsensusStates::get((identifier, client_state.latest_height));
                 // TODO: verify header using validity_predicate
-                let justification =
-                    justification::GrandpaJustification::<Block>::decode(&mut &*justification);
+                let justification = justification::GrandpaJustification::<Block>::decode(
+                    &mut &*header.justification,
+                );
                 debug::native::print!(
-                    "consensus_state: {:?}, header: {:?}, justification: {:?}, authorities_proof: {:?}",
+                    "consensus_state: {:?}, header: {:?}",
                     consensus_state,
                     header,
-                    justification,
-                    authorities_proof,
                 );
                 if let Ok(justification) = justification {
                     let result = justification.verify(
@@ -533,29 +527,26 @@ impl<T: Trait> Module<T> {
                     );
                     debug::native::print!("verify result: {:?}", result);
                     if result.is_ok() {
-                        let block_hash = header.hash();
-                        debug::native::print!("block_hash: {:?}", block_hash);
-                        assert_eq!(block_hash, justification.commit.target_hash);
+                        debug::native::print!("block_hash: {:?}", header.block_hash);
+                        assert_eq!(header.block_hash, justification.commit.target_hash);
                         Clients::mutate(&identifier, |client_state| {
-                            (*client_state).latest_height = header.number;
+                            (*client_state).latest_height = header.height;
                         });
                         let new_consensus_state = ConsensusState {
-                            validity_predicate: vec![],
-                            misbehaviour_predicate: vec![],
                             set_id: consensus_state.set_id,
                             authorities: consensus_state.authorities.clone(),
-                            commitment_root: header.state_root,
+                            commitment_root: header.commitment_root,
                         };
                         debug::native::print!(
                             "consensus_state inserted: {:?}, {}",
                             identifier,
-                            header.number
+                            header.height
                         );
-                        ConsensusStates::insert((identifier, header.number), new_consensus_state);
+                        ConsensusStates::insert((identifier, header.height), new_consensus_state);
 
                         let result = read_proof_check::<BlakeTwo256>(
-                            header.state_root,
-                            StorageProof::new(authorities_proof),
+                            header.commitment_root,
+                            StorageProof::new(header.authorities_proof),
                             &GRANDPA_AUTHORITIES_KEY.to_vec(),
                         );
                         // TODO
@@ -567,7 +558,7 @@ impl<T: Trait> Module<T> {
                         debug::native::print!("new_authorities: {:?}", new_authorities);
                         if new_authorities != consensus_state.authorities {
                             ConsensusStates::mutate(
-                                (identifier, header.number),
+                                (identifier, header.height),
                                 |consensus_state| {
                                     (*consensus_state).set_id += 1;
                                     (*consensus_state).authorities = new_authorities;
