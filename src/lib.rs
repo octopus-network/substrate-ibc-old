@@ -1,6 +1,7 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod clients;
 mod handler;
 mod justification;
 mod routing;
@@ -19,6 +20,8 @@ use sp_runtime::{
 use sp_std::prelude::*;
 use state_machine::{read_proof_check, StorageProof};
 use system::ensure_signed;
+
+pub use clients::ClientType;
 
 type BlockNumber = u32;
 type Block = generic::Block<generic::Header<BlockNumber, BlakeTwo256>, UncheckedExtrinsic>;
@@ -134,16 +137,16 @@ pub struct ConnectionEnd {
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ClientState {
-    frozen: bool,
     pub latest_height: u32,
+    frozen_height: Option<u32>,
     pub connections: Vec<H256>, // TODO: fixme! O(n)
 }
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
 pub struct ConsensusState {
-    set_id: SetId,
-    authorities: AuthorityList,
-    commitment_root: H256,
+    pub set_id: SetId,
+    pub authorities: AuthorityList,
+    pub commitment_root: H256,
 }
 
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug)]
@@ -302,29 +305,23 @@ decl_module! {
 impl<T: Trait> Module<T> {
     pub fn create_client(
         identifier: H256,
+        client_type: clients::ClientType,
         height: u32,
-        commitment_root: H256,
-        set_id: SetId,
-        authorities: AuthorityList,
+        consensus_state: ConsensusState,
     ) -> DispatchResult {
         ensure!(
             !Clients::contains_key(&identifier),
             "Client identifier already exists"
         );
 
+        ConsensusStates::insert((identifier, height), consensus_state);
         let client_state = ClientState {
-            frozen: false,
             latest_height: height,
+            frozen_height: None,
             connections: vec![],
         };
         Clients::insert(&identifier, client_state);
 
-        let consensus_state = ConsensusState {
-            set_id,
-            authorities,
-            commitment_root,
-        };
-        ConsensusStates::insert((identifier, height), consensus_state);
         Self::deposit_event(RawEvent::ClientCreated);
         Ok(())
     }
