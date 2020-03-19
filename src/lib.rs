@@ -62,14 +62,14 @@ pub enum Datagram {
     ConnOpenAck {
         identifier: H256,
         version: Vec<u8>,
-        proof_try: Vec<u8>,
-        proof_consensus: Vec<u8>,
+        proof_try: Vec<Vec<u8>>,
+        proof_consensus: Vec<Vec<u8>>,
         proof_height: u32,
         consensus_height: u32,
     },
     ConnOpenConfirm {
         identifier: H256,
-        proof_ack: Vec<u8>,
+        proof_ack: Vec<Vec<u8>>,
         proof_height: u32,
     },
     ChanOpenTry {
@@ -211,16 +211,13 @@ decl_storage! {
     // This allows for type-safe usage of the Substrate storage database, so you can
     // keep things around between blocks.
     trait Store for Module<T: Trait> as Ibc {
-        Something get(fn something): Option<u32>;
-
         Clients: map hasher(blake2_128_concat) H256 => ClientState; // client_identifier => ClientState
         ConsensusStates: map hasher(blake2_128_concat) (H256, u32) => ConsensusState; // (client_identifier, height) => ConsensusState
         Connections: map hasher(blake2_128_concat) H256 => ConnectionEnd; // connection_identifier => ConnectionEnd
-
-        Ports: map hasher(blake2_128_concat) Vec<u8> => u8;
-        Channels: map hasher(blake2_128_concat) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
-        NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64;
-        NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64;
+        Ports: map hasher(blake2_128_concat) Vec<u8> => u8; // port_identifier => module_index
+        Channels: map hasher(blake2_128_concat) (Vec<u8>, H256) => ChannelEnd; // (port_identifier, channel_identifier) => ChannelEnd
+        NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
+        NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
     }
 }
 
@@ -671,12 +668,36 @@ impl<T: Trait> Module<T> {
                     "Connection not found"
                 );
                 // abortTransactionUnless(consensusHeight <= getCurrentHeight())
-                // connection = provableStore.get(connectionPath(identifier))
-                // abortTransactionUnless(connection.state === INIT || connection.state === TRYOPEN)
+                let connection = Connections::get(&identifier);
+                ensure!(
+                    connection.state == ConnectionState::Init
+                        || connection.state == ConnectionState::TryOpen,
+                    "connection state error"
+                );
                 // expectedConsensusState = getConsensusState(consensusHeight)
                 // expected = ConnectionEnd{TRYOPEN, identifier, getCommitmentPrefix(),
                 //                          connection.counterpartyClientIdentifier, connection.clientIdentifier,
                 //                          version}
+                ensure!(
+                    ConsensusStates::contains_key((connection.client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let consensus_state =
+                    ConsensusStates::get((connection.client_identifier, proof_height));
+                let key =
+                    Connections::hashed_key_for(connection.counterparty_connection_identifier);
+                let result = read_proof_check::<BlakeTwo256>(
+                    consensus_state.commitment_root,
+                    StorageProof::new(proof_try),
+                    &key,
+                );
+                let result = result.unwrap().unwrap();
+                let connection_end = ConnectionEnd::decode(&mut &*result).unwrap();
+                debug::native::print!(
+                    "connecion_end: {:?}, counterparty_connection_identifier: {:?}",
+                    connection_end,
+                    connection.counterparty_connection_identifier
+                );
                 // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofTry, connection.counterpartyConnectionIdentifier, expected))
                 // abortTransactionUnless(connection.verifyClientConsensusState(proofHeight, proofConsensus, connection.counterpartyClientIdentifier, expectedConsensusState))
                 Connections::mutate(&identifier, |connection| {
@@ -697,7 +718,32 @@ impl<T: Trait> Module<T> {
                     "Connection not found"
                 );
                 // connection = provableStore.get(connectionPath(identifier))
+                let connection = Connections::get(&identifier);
+                ensure!(
+                    connection.state == ConnectionState::TryOpen,
+                    "connection state error"
+                );
                 // abortTransactionUnless(connection.state === TRYOPEN)
+                ensure!(
+                    ConsensusStates::contains_key((connection.client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let consensus_state =
+                    ConsensusStates::get((connection.client_identifier, proof_height));
+                let key =
+                    Connections::hashed_key_for(connection.counterparty_connection_identifier);
+                let result = read_proof_check::<BlakeTwo256>(
+                    consensus_state.commitment_root,
+                    StorageProof::new(proof_ack),
+                    &key,
+                );
+                let result = result.unwrap().unwrap();
+                let connection_end = ConnectionEnd::decode(&mut &*result).unwrap();
+                debug::native::print!(
+                    "connecion_end: {:?}, counterparty_connection_identifier: {:?}",
+                    connection_end,
+                    connection.counterparty_connection_identifier
+                );
                 // expected = ConnectionEnd{OPEN, identifier, getCommitmentPrefix(), connection.counterpartyClientIdentifier,
                 //                          connection.clientIdentifier, connection.version}
                 // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofAck, connection.counterpartyConnectionIdentifier, expected))
