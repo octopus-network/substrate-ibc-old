@@ -140,6 +140,7 @@ pub struct ClientState {
     pub latest_height: u32,
     frozen_height: Option<u32>,
     pub connections: Vec<H256>, // TODO: fixme! O(n)
+    pub channels: Vec<(Vec<u8>, H256)>,
 }
 
 #[derive(Clone, Default, Encode, Decode, RuntimeDebug)]
@@ -220,7 +221,6 @@ decl_storage! {
         Channels: map hasher(blake2_128_concat) (Vec<u8>, H256) => ChannelEnd; // ports/{portIdentifier}/channels/{channelIdentifier}
         NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64;
         NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64;
-        ChannelKeys: Vec<(Vec<u8>, H256)>; // TODO
     }
 }
 
@@ -319,6 +319,7 @@ impl<T: Trait> Module<T> {
             latest_height: height,
             frozen_height: None,
             connections: vec![],
+            channels: vec![],
         };
         Clients::insert(&identifier, client_state);
 
@@ -432,8 +433,10 @@ impl<T: Trait> Module<T> {
         NextSequenceSend::insert((port_identifier.clone(), channel_identifier), 1);
         NextSequenceRecv::insert((port_identifier.clone(), channel_identifier), 1);
         // return key
-        ChannelKeys::mutate(|keys| {
-            (*keys).push((port_identifier.clone(), channel_identifier));
+        Clients::mutate(&connection.client_identifier, |client_state| {
+            (*client_state)
+                .channels
+                .push((port_identifier.clone(), channel_identifier));
         });
         Self::deposit_event(RawEvent::ChanOpenInitReceived);
         Ok(())
@@ -769,8 +772,10 @@ impl<T: Trait> Module<T> {
                 NextSequenceSend::insert((port_identifier.clone(), channel_identifier), 1);
                 NextSequenceRecv::insert((port_identifier.clone(), channel_identifier), 1);
                 // return key
-                ChannelKeys::mutate(|keys| {
-                    (*keys).push((port_identifier.clone(), channel_identifier));
+                Clients::mutate(&connection.client_identifier, |client_state| {
+                    (*client_state)
+                        .channels
+                        .push((port_identifier.clone(), channel_identifier));
                 });
                 Self::deposit_event(RawEvent::ChanOpenTryReceived);
             }
