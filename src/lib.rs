@@ -81,20 +81,20 @@ pub enum Datagram {
         counterparty_channel_identifier: H256,
         version: Vec<u8>,
         counterparty_version: Vec<u8>,
-        proof_init: Vec<u8>,
+        proof_init: Vec<Vec<u8>>,
         proof_height: u32,
     },
     ChanOpenAck {
         port_identifier: Vec<u8>,
         channel_identifier: H256,
         version: Vec<u8>,
-        proof_try: Vec<u8>,
+        proof_try: Vec<Vec<u8>>,
         proof_height: u32,
     },
     ChanOpenConfirm {
         port_identifier: Vec<u8>,
         channel_identifier: H256,
-        proof_ack: Vec<u8>,
+        proof_ack: Vec<Vec<u8>>,
         proof_height: u32,
     },
     PacketRecv {
@@ -615,27 +615,13 @@ impl<T: Trait> Module<T> {
                     ConsensusStates::contains_key((client_identifier, proof_height)),
                     "ConsensusState not found"
                 );
-                let consensus_state = ConsensusStates::get((client_identifier, proof_height));
-                let key = Connections::hashed_key_for(counterparty_connection_identifier);
-                debug::native::print!(
-                    "commitment_root: {:?}, counterparty_connection_identifier: {:?}, key: {:?}",
-                    consensus_state.commitment_root,
+                let value = Self::verify_connection_state(
+                    client_identifier,
+                    proof_height,
                     counterparty_connection_identifier,
-                    key
+                    proof_init,
                 );
-                let result = read_proof_check::<BlakeTwo256>(
-                    consensus_state.commitment_root,
-                    StorageProof::new(proof_init),
-                    &key,
-                );
-                let result = result.unwrap().unwrap();
-                let connection_end = ConnectionEnd::decode(&mut &*result).unwrap();
-                debug::native::print!(
-                    "connecion_end: {:?}, counterparty_connection_identifier: {:?}",
-                    connection_end,
-                    counterparty_connection_identifier
-                );
-
+                ensure!(value.is_some(), "verify connection state failed");
                 // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofInit, counterpartyConnectionIdentifier, expected))
                 // abortTransactionUnless(connection.verifyClientConsensusState(proofHeight, proofConsensus, counterpartyClientIdentifier, expectedConsensusState))
                 // previous = provableStore.get(connectionPath(desiredIdentifier))
@@ -682,22 +668,13 @@ impl<T: Trait> Module<T> {
                     ConsensusStates::contains_key((connection.client_identifier, proof_height)),
                     "ConsensusState not found"
                 );
-                let consensus_state =
-                    ConsensusStates::get((connection.client_identifier, proof_height));
-                let key =
-                    Connections::hashed_key_for(connection.counterparty_connection_identifier);
-                let result = read_proof_check::<BlakeTwo256>(
-                    consensus_state.commitment_root,
-                    StorageProof::new(proof_try),
-                    &key,
+                let value = Self::verify_connection_state(
+                    connection.client_identifier,
+                    proof_height,
+                    connection.counterparty_connection_identifier,
+                    proof_try,
                 );
-                let result = result.unwrap().unwrap();
-                let connection_end = ConnectionEnd::decode(&mut &*result).unwrap();
-                debug::native::print!(
-                    "connecion_end: {:?}, counterparty_connection_identifier: {:?}",
-                    connection_end,
-                    connection.counterparty_connection_identifier
-                );
+                ensure!(value.is_some(), "verify connection state failed");
                 // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofTry, connection.counterpartyConnectionIdentifier, expected))
                 // abortTransactionUnless(connection.verifyClientConsensusState(proofHeight, proofConsensus, connection.counterpartyClientIdentifier, expectedConsensusState))
                 Connections::mutate(&identifier, |connection| {
@@ -728,22 +705,13 @@ impl<T: Trait> Module<T> {
                     ConsensusStates::contains_key((connection.client_identifier, proof_height)),
                     "ConsensusState not found"
                 );
-                let consensus_state =
-                    ConsensusStates::get((connection.client_identifier, proof_height));
-                let key =
-                    Connections::hashed_key_for(connection.counterparty_connection_identifier);
-                let result = read_proof_check::<BlakeTwo256>(
-                    consensus_state.commitment_root,
-                    StorageProof::new(proof_ack),
-                    &key,
+                let value = Self::verify_connection_state(
+                    connection.client_identifier,
+                    proof_height,
+                    connection.counterparty_connection_identifier,
+                    proof_ack,
                 );
-                let result = result.unwrap().unwrap();
-                let connection_end = ConnectionEnd::decode(&mut &*result).unwrap();
-                debug::native::print!(
-                    "connecion_end: {:?}, counterparty_connection_identifier: {:?}",
-                    connection_end,
-                    connection.counterparty_connection_identifier
-                );
+                ensure!(value.is_some(), "verify connection state failed");
                 // expected = ConnectionEnd{OPEN, identifier, getCommitmentPrefix(), connection.counterpartyClientIdentifier,
                 //                          connection.clientIdentifier, connection.version}
                 // abortTransactionUnless(connection.verifyConnectionState(proofHeight, proofAck, connection.counterpartyConnectionIdentifier, expected))
@@ -795,6 +763,19 @@ impl<T: Trait> Module<T> {
                     connection.state == ConnectionState::Open,
                     "connection has been closed"
                 );
+
+                ensure!(
+                    ConsensusStates::contains_key((connection.client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let value = Self::verify_channel_state(
+                    connection.client_identifier,
+                    proof_height,
+                    counterparty_port_identifier.clone(),
+                    counterparty_channel_identifier,
+                    proof_init,
+                );
+                ensure!(value.is_some(), "verify channel state failed");
                 // expected = ChannelEnd{INIT, order, portIdentifier,
                 //                       channelIdentifier, connectionHops.reverse(), counterpartyVersion}
                 // abortTransactionUnless(connection.verifyChannelState(
@@ -851,6 +832,18 @@ impl<T: Trait> Module<T> {
                     connection.state == ConnectionState::Open,
                     "connection has been closed"
                 );
+                ensure!(
+                    ConsensusStates::contains_key((connection.client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let value = Self::verify_channel_state(
+                    connection.client_identifier,
+                    proof_height,
+                    channel.counterparty_port_identifier,
+                    channel.counterparty_channel_identifier,
+                    proof_try,
+                );
+                ensure!(value.is_some(), "verify channel state failed");
                 // expected = ChannelEnd{TRYOPEN, channel.order, portIdentifier,
                 //                       channelIdentifier, channel.connectionHops.reverse(), counterpartyVersion}
                 // abortTransactionUnless(connection.verifyChannelState(
@@ -891,6 +884,18 @@ impl<T: Trait> Module<T> {
                     connection.state == ConnectionState::Open,
                     "connection has been closed"
                 );
+                ensure!(
+                    ConsensusStates::contains_key((connection.client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let value = Self::verify_channel_state(
+                    connection.client_identifier,
+                    proof_height,
+                    channel.counterparty_port_identifier,
+                    channel.counterparty_channel_identifier,
+                    proof_ack,
+                );
+                ensure!(value.is_some(), "verify channel state failed");
                 // expected = ChannelEnd{OPEN, channel.order, portIdentifier,
                 //                       channelIdentifier, channel.connectionHops.reverse(), channel.version}
                 // abortTransactionUnless(connection.verifyChannelState(
@@ -1041,6 +1046,83 @@ impl<T: Trait> Module<T> {
             }
         }
         Ok(())
+    }
+
+    fn verify_connection_state(
+        client_identifier: H256,
+        proof_height: u32,
+        connection_identifier: H256,
+        proof: Vec<Vec<u8>>,
+    ) -> Option<ConnectionEnd> {
+        let consensus_state = ConsensusStates::get((client_identifier, proof_height));
+        let key = Connections::hashed_key_for(connection_identifier);
+        let value = read_proof_check::<BlakeTwo256>(
+            consensus_state.commitment_root,
+            StorageProof::new(proof),
+            &key,
+        );
+        match value {
+            Ok(value) => match value {
+                Some(value) => {
+                    let connection_end = ConnectionEnd::decode(&mut &*value);
+                    match connection_end {
+                        Ok(connection_end) => {
+                            return Some(connection_end);
+                        }
+                        Err(error) => {
+                            debug::native::print!("trie value decode error: {:?}", error);
+                        }
+                    }
+                }
+                None => {
+                    debug::native::print!("read_proof_check error: value not exists");
+                }
+            },
+            Err(error) => {
+                debug::native::print!("read_proof_check error: {:?}", error);
+            }
+        }
+
+        None
+    }
+
+    fn verify_channel_state(
+        client_identifier: H256,
+        proof_height: u32,
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        proof: Vec<Vec<u8>>,
+    ) -> Option<ChannelEnd> {
+        let consensus_state = ConsensusStates::get((client_identifier, proof_height));
+        let key = Channels::hashed_key_for((port_identifier, channel_identifier));
+        let value = read_proof_check::<BlakeTwo256>(
+            consensus_state.commitment_root,
+            StorageProof::new(proof),
+            &key,
+        );
+        match value {
+            Ok(value) => match value {
+                Some(value) => {
+                    let channel_end = ChannelEnd::decode(&mut &*value);
+                    match channel_end {
+                        Ok(channel_end) => {
+                            return Some(channel_end);
+                        }
+                        Err(error) => {
+                            debug::native::print!("trie value decode error: {:?}", error);
+                        }
+                    }
+                }
+                None => {
+                    debug::native::print!("read_proof_check error: value not exists");
+                }
+            },
+            Err(error) => {
+                debug::native::print!("read_proof_check error: {:?}", error);
+            }
+        }
+
+        None
     }
 }
 
