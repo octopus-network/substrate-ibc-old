@@ -15,7 +15,9 @@ use frame_support::{
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
 use sp_runtime::{
-    generic, traits::BlakeTwo256, OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
+    generic,
+    traits::{BlakeTwo256, Hash},
+    OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
 };
 use sp_std::prelude::*;
 use state_machine::{read_proof_check, StorageProof};
@@ -99,13 +101,13 @@ pub enum Datagram {
     },
     PacketRecv {
         packet: Packet,
-        proof: Vec<u8>,
+        proof: Vec<Vec<u8>>,
         proof_height: u32,
     },
     PacketAcknowledgement {
         packet: Packet,
         acknowledgement: Vec<u8>,
-        proof: Vec<u8>,
+        proof: Vec<Vec<u8>>,
         proof_height: u32,
     },
 }
@@ -218,6 +220,7 @@ decl_storage! {
         Channels: map hasher(blake2_128_concat) (Vec<u8>, H256) => ChannelEnd; // (port_identifier, channel_identifier) => ChannelEnd
         NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
         NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
+        Packets: map hasher(blake2_128_concat) (Vec<u8>, H256, u64) => H256; // (port_identifier, channel_identifier, sequence) => Hash
     }
 }
 
@@ -477,6 +480,17 @@ impl<T: Trait> Module<T> {
         NextSequenceSend::insert(
             (packet.source_port.clone(), packet.source_channel),
             next_sequence_send,
+        );
+        let timeout_height = packet.timeout_height.encode();
+        let hash = BlakeTwo256::hash_of(&[&packet.data[..], &timeout_height[..]].concat());
+
+        Packets::insert(
+            (
+                packet.source_port.clone(),
+                packet.source_channel,
+                packet.sequence,
+            ),
+            hash,
         );
         // provableStore.set(packetCommitmentPath(packet.sourcePort, packet.sourceChannel, packet.sequence), hash(packet.data, packet.timeout))
 
@@ -943,6 +957,22 @@ impl<T: Trait> Module<T> {
 
                 // abortTransactionUnless(getConsensusHeight() < packet.timeoutHeight)
 
+                ensure!(
+                    ConsensusStates::contains_key((connection.client_identifier, proof_height)),
+                    "ConsensusState not found"
+                );
+                let value = Self::verify_packet_data(
+                    connection.client_identifier,
+                    proof_height,
+                    proof,
+                    packet.source_port.clone(),
+                    packet.source_channel,
+                    packet.sequence,
+                );
+                ensure!(value.is_some(), "verify packet data failed");
+                let timeout_height = packet.timeout_height.encode();
+                let hash = BlakeTwo256::hash_of(&[&packet.data[..], &timeout_height[..]].concat());
+                ensure!(value.unwrap() == hash, "packet hash not match");
                 // abortTransactionUnless(connection.verifyPacketCommitment(
                 //   proofHeight,
                 //   proof,
@@ -1107,6 +1137,46 @@ impl<T: Trait> Module<T> {
                     match channel_end {
                         Ok(channel_end) => {
                             return Some(channel_end);
+                        }
+                        Err(error) => {
+                            debug::native::print!("trie value decode error: {:?}", error);
+                        }
+                    }
+                }
+                None => {
+                    debug::native::print!("read_proof_check error: value not exists");
+                }
+            },
+            Err(error) => {
+                debug::native::print!("read_proof_check error: {:?}", error);
+            }
+        }
+
+        None
+    }
+
+    fn verify_packet_data(
+        client_identifier: H256,
+        proof_height: u32,
+        proof: Vec<Vec<u8>>,
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        sequence: u64,
+    ) -> Option<H256> {
+        let consensus_state = ConsensusStates::get((client_identifier, proof_height));
+        let key = Packets::hashed_key_for((port_identifier, channel_identifier, sequence));
+        let value = read_proof_check::<BlakeTwo256>(
+            consensus_state.commitment_root,
+            StorageProof::new(proof),
+            &key,
+        );
+        match value {
+            Ok(value) => match value {
+                Some(value) => {
+                    let hash = H256::decode(&mut &*value);
+                    match hash {
+                        Ok(hash) => {
+                            return Some(hash);
                         }
                         Err(error) => {
                             debug::native::print!("trie value decode error: {:?}", error);
