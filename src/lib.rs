@@ -10,7 +10,7 @@ mod state_machine;
 use codec::{Decode, Encode};
 use frame_support::{
     debug, decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
-    weights::SimpleDispatchInfo,
+    weights::{SimpleDispatchInfo, WeighData, Weight},
 };
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
@@ -277,14 +277,14 @@ decl_module! {
         // This function could also very well have a weight annotation, similar to any other. The
         // only difference being that if it is not annotated, the default is
         // `SimpleDispatchInfo::zero()`, which resolves into no weight.
-        #[weight = SimpleDispatchInfo::FixedNormal(1000)]
-        fn on_initialize(_n: T::BlockNumber) {
+        fn on_initialize(_n: T::BlockNumber) -> Weight {
             // Anything that needs to be done at the start of the block.
             // We don't do anything here.
+
+            SimpleDispatchInfo::default().weigh_data(())
         }
 
         // The signature could also look like: `fn on_finalize()`
-        #[weight = SimpleDispatchInfo::FixedNormal(2000)]
         fn on_finalize(_n: T::BlockNumber) {
             // Anything that needs to be done at the end of the block.
             // We just kill our dummy storage item.
@@ -297,7 +297,7 @@ decl_module! {
         fn offchain_worker(_n: T::BlockNumber) {
             // We don't do anything here.
             // but we could dispatch extrinsic (transaction/unsigned/inherent) using
-            // runtime_io::submit_extrinsic
+            // sp_io::submit_extrinsic
         }
     }
 }
