@@ -10,7 +10,7 @@ mod state_machine;
 use codec::{Decode, Encode};
 use frame_support::{
     debug, decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
-    weights::{SimpleDispatchInfo, WeighData, Weight},
+    weights::{SimpleDispatchInfo, Weight, MINIMUM_WEIGHT},
 };
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
@@ -20,8 +20,9 @@ use sp_runtime::{
     OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
 };
 use sp_std::prelude::*;
-use state_machine::{read_proof_check, StorageProof};
+use state_machine::{read_proof_check};
 use system::ensure_signed;
+use sp_trie::StorageProof;
 
 pub use clients::ClientType;
 
@@ -56,22 +57,22 @@ pub enum Datagram {
         client_identifier: H256,
         version: Vec<u8>,
         counterparty_version: Vec<u8>,
-        proof_init: Vec<Vec<u8>>,
-        proof_consensus: Vec<Vec<u8>>,
+        proof_init: StorageProof,
+        proof_consensus: StorageProof,
         proof_height: u32,
         consensus_height: u32,
     },
     ConnOpenAck {
         identifier: H256,
         version: Vec<u8>,
-        proof_try: Vec<Vec<u8>>,
-        proof_consensus: Vec<Vec<u8>>,
+        proof_try: StorageProof,
+        proof_consensus: StorageProof,
         proof_height: u32,
         consensus_height: u32,
     },
     ConnOpenConfirm {
         identifier: H256,
-        proof_ack: Vec<Vec<u8>>,
+        proof_ack: StorageProof,
         proof_height: u32,
     },
     ChanOpenTry {
@@ -83,31 +84,31 @@ pub enum Datagram {
         counterparty_channel_identifier: H256,
         version: Vec<u8>,
         counterparty_version: Vec<u8>,
-        proof_init: Vec<Vec<u8>>,
+        proof_init: StorageProof,
         proof_height: u32,
     },
     ChanOpenAck {
         port_identifier: Vec<u8>,
         channel_identifier: H256,
         version: Vec<u8>,
-        proof_try: Vec<Vec<u8>>,
+        proof_try: StorageProof,
         proof_height: u32,
     },
     ChanOpenConfirm {
         port_identifier: Vec<u8>,
         channel_identifier: H256,
-        proof_ack: Vec<Vec<u8>>,
+        proof_ack: StorageProof,
         proof_height: u32,
     },
     PacketRecv {
         packet: Packet,
-        proof: Vec<Vec<u8>>,
+        proof: StorageProof,
         proof_height: u32,
     },
     PacketAcknowledgement {
         packet: Packet,
         acknowledgement: Vec<u8>,
-        proof: Vec<Vec<u8>>,
+        proof: StorageProof,
         proof_height: u32,
     },
 }
@@ -158,7 +159,7 @@ pub struct Header {
     pub block_hash: H256,
     pub commitment_root: H256,
     pub justification: Vec<u8>,
-    pub authorities_proof: Vec<Vec<u8>>,
+    pub authorities_proof: StorageProof,
 }
 
 #[derive(Clone, PartialEq, Encode, Decode, RuntimeDebug)]
@@ -265,7 +266,7 @@ decl_module! {
         /// This is your public interface. Be extremely careful.
         /// This is just a simple example of how to interact with the module from the external
         /// world.
-        #[weight = SimpleDispatchInfo::FixedNormal(1000)]
+		    #[weight = SimpleDispatchInfo::FixedNormal(MINIMUM_WEIGHT)]
         fn submit_datagram(origin, datagram: Datagram) -> DispatchResult
         {
             debug::RuntimeLogger::init();
@@ -281,7 +282,7 @@ decl_module! {
             // Anything that needs to be done at the start of the block.
             // We don't do anything here.
 
-            SimpleDispatchInfo::default().weigh_data(())
+			      MINIMUM_WEIGHT
         }
 
         // The signature could also look like: `fn on_finalize()`
@@ -557,7 +558,7 @@ impl<T: Trait> Module<T> {
 
                         let result = read_proof_check::<BlakeTwo256>(
                             header.commitment_root,
-                            StorageProof::new(header.authorities_proof),
+                            header.authorities_proof,
                             &GRANDPA_AUTHORITIES_KEY.to_vec(),
                         );
                         // TODO
@@ -1082,13 +1083,13 @@ impl<T: Trait> Module<T> {
         client_identifier: H256,
         proof_height: u32,
         connection_identifier: H256,
-        proof: Vec<Vec<u8>>,
+        proof: StorageProof,
     ) -> Option<ConnectionEnd> {
         let consensus_state = ConsensusStates::get((client_identifier, proof_height));
         let key = Connections::hashed_key_for(connection_identifier);
         let value = read_proof_check::<BlakeTwo256>(
             consensus_state.commitment_root,
-            StorageProof::new(proof),
+            proof,
             &key,
         );
         match value {
@@ -1121,13 +1122,13 @@ impl<T: Trait> Module<T> {
         proof_height: u32,
         port_identifier: Vec<u8>,
         channel_identifier: H256,
-        proof: Vec<Vec<u8>>,
+        proof: StorageProof,
     ) -> Option<ChannelEnd> {
         let consensus_state = ConsensusStates::get((client_identifier, proof_height));
         let key = Channels::hashed_key_for((port_identifier, channel_identifier));
         let value = read_proof_check::<BlakeTwo256>(
             consensus_state.commitment_root,
-            StorageProof::new(proof),
+            proof,
             &key,
         );
         match value {
@@ -1158,7 +1159,7 @@ impl<T: Trait> Module<T> {
     fn verify_packet_data(
         client_identifier: H256,
         proof_height: u32,
-        proof: Vec<Vec<u8>>,
+        proof: StorageProof,
         port_identifier: Vec<u8>,
         channel_identifier: H256,
         sequence: u64,
@@ -1167,7 +1168,7 @@ impl<T: Trait> Module<T> {
         let key = Packets::hashed_key_for((port_identifier, channel_identifier, sequence));
         let value = read_proof_check::<BlakeTwo256>(
             consensus_state.commitment_root,
-            StorageProof::new(proof),
+            proof,
             &key,
         );
         match value {

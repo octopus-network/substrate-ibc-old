@@ -1,54 +1,7 @@
-use codec::{Codec, Decode, Encode};
+use codec::Codec;
 use hash_db::{HashDB, Hasher, EMPTY_PREFIX};
 use sp_std::prelude::*;
-use sp_trie::{read_trie_value, trie_types::Layout, MemoryDB, TrieError};
-
-/// A proof that some set of key-value pairs are included in the storage trie. The proof contains
-/// the storage values so that the partial storage backend can be reconstructed by a verifier that
-/// does not already have access to the key-value pairs.
-///
-/// The proof consists of the set of serialized nodes in the storage trie accessed when looking up
-/// the keys covered by the proof. Verifying the proof requires constructing the partial trie from
-/// the serialized nodes and performing the key lookups.
-#[derive(Debug, PartialEq, Eq, Clone, Encode, Decode)]
-pub struct StorageProof {
-    trie_nodes: Vec<Vec<u8>>,
-}
-
-impl StorageProof {
-    /// Constructs a storage proof from a subset of encoded trie nodes in a storage backend.
-    pub fn new(trie_nodes: Vec<Vec<u8>>) -> Self {
-        StorageProof { trie_nodes }
-    }
-
-    /// Create an iterator over trie nodes constructed from the proof. The nodes are not guaranteed
-    /// to be traversed in any particular order.
-    pub fn iter_nodes(self) -> StorageProofNodeIterator {
-        StorageProofNodeIterator::new(self)
-    }
-}
-
-/// An iterator over trie nodes constructed from a storage proof. The nodes are not guaranteed to
-/// be traversed in any particular order.
-pub struct StorageProofNodeIterator {
-    inner: <Vec<Vec<u8>> as IntoIterator>::IntoIter,
-}
-
-impl StorageProofNodeIterator {
-    fn new(proof: StorageProof) -> Self {
-        StorageProofNodeIterator {
-            inner: proof.trie_nodes.into_iter(),
-        }
-    }
-}
-
-impl Iterator for StorageProofNodeIterator {
-    type Item = Vec<u8>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
+use sp_trie::{read_trie_value, trie_types::Layout, MemoryDB, TrieError, StorageProof};
 
 /// Create in-memory storage of proof check backend.
 fn create_proof_check_backend_storage<H>(proof: StorageProof) -> MemoryDB<H>
