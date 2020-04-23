@@ -1,6 +1,6 @@
 pub enum ClientType {
-	  Loopback,
-	  SoloMachine,
-	  Tendermint,
-	  GRANDPA,
+    Loopback,
+    SoloMachine,
+    Tendermint,
+    GRANDPA,
 }

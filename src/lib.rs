@@ -9,8 +9,10 @@ mod state_machine;
 
 use codec::{Decode, Encode};
 use frame_support::{
-    debug, decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure,
-    weights::{SimpleDispatchInfo, Weight, MINIMUM_WEIGHT},
+    debug, decl_event, decl_module, decl_storage,
+    dispatch::DispatchResult,
+    ensure,
+    weights::{Weight, MINIMUM_WEIGHT},
 };
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
@@ -20,9 +22,9 @@ use sp_runtime::{
     OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
 };
 use sp_std::prelude::*;
-use state_machine::{read_proof_check};
-use system::ensure_signed;
 use sp_trie::StorageProof;
+use state_machine::read_proof_check;
+use system::ensure_signed;
 
 pub use clients::ClientType;
 
@@ -266,7 +268,7 @@ decl_module! {
         /// This is your public interface. Be extremely careful.
         /// This is just a simple example of how to interact with the module from the external
         /// world.
-		    #[weight = SimpleDispatchInfo::FixedNormal(MINIMUM_WEIGHT)]
+            #[weight = MINIMUM_WEIGHT]
         fn submit_datagram(origin, datagram: Datagram) -> DispatchResult
         {
             debug::RuntimeLogger::init();
@@ -282,7 +284,7 @@ decl_module! {
             // Anything that needs to be done at the start of the block.
             // We don't do anything here.
 
-			      MINIMUM_WEIGHT
+                  MINIMUM_WEIGHT
         }
 
         // The signature could also look like: `fn on_finalize()`
@@ -1087,11 +1089,7 @@ impl<T: Trait> Module<T> {
     ) -> Option<ConnectionEnd> {
         let consensus_state = ConsensusStates::get((client_identifier, proof_height));
         let key = Connections::hashed_key_for(connection_identifier);
-        let value = read_proof_check::<BlakeTwo256>(
-            consensus_state.commitment_root,
-            proof,
-            &key,
-        );
+        let value = read_proof_check::<BlakeTwo256>(consensus_state.commitment_root, proof, &key);
         match value {
             Ok(value) => match value {
                 Some(value) => {
@@ -1126,11 +1124,7 @@ impl<T: Trait> Module<T> {
     ) -> Option<ChannelEnd> {
         let consensus_state = ConsensusStates::get((client_identifier, proof_height));
         let key = Channels::hashed_key_for((port_identifier, channel_identifier));
-        let value = read_proof_check::<BlakeTwo256>(
-            consensus_state.commitment_root,
-            proof,
-            &key,
-        );
+        let value = read_proof_check::<BlakeTwo256>(consensus_state.commitment_root, proof, &key);
         match value {
             Ok(value) => match value {
                 Some(value) => {
@@ -1166,11 +1160,7 @@ impl<T: Trait> Module<T> {
     ) -> Option<H256> {
         let consensus_state = ConsensusStates::get((client_identifier, proof_height));
         let key = Packets::hashed_key_for((port_identifier, channel_identifier, sequence));
-        let value = read_proof_check::<BlakeTwo256>(
-            consensus_state.commitment_root,
-            proof,
-            &key,
-        );
+        let value = read_proof_check::<BlakeTwo256>(consensus_state.commitment_root, proof, &key);
         match value {
             Ok(value) => match value {
                 Some(value) => {

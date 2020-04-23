@@ -1,7 +1,7 @@
 use codec::Codec;
 use hash_db::{HashDB, Hasher, EMPTY_PREFIX};
 use sp_std::prelude::*;
-use sp_trie::{read_trie_value, trie_types::Layout, MemoryDB, TrieError, StorageProof};
+use sp_trie::{read_trie_value, trie_types::Layout, MemoryDB, StorageProof, TrieError};
 
 /// Create in-memory storage of proof check backend.
 fn create_proof_check_backend_storage<H>(proof: StorageProof) -> MemoryDB<H>

@@ -5,7 +5,7 @@ authors = ["Yuanchao Sun <ys@cdot.network>"]
 edition = "2018"
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "1.2.0", default-features = false }
+codec = { package = "parity-scale-codec", version = "1.3.0", default-features = false }
 finality-grandpa = { version = "0.11.1", features = ["derive-codec"], default-features = false }
 hash-db = { version = "0.15.2", default-features = false }
 serde = { version = "1.0.101", optional = true }
