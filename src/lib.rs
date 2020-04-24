@@ -9,7 +9,7 @@ mod state_machine;
 
 use codec::{Decode, Encode};
 use frame_support::{
-    debug, decl_event, decl_module, decl_storage,
+    decl_event, decl_module, decl_storage,
     dispatch::DispatchResult,
     ensure,
     weights::{Weight, MINIMUM_WEIGHT},
@@ -21,7 +21,7 @@ use sp_runtime::{
     traits::{BlakeTwo256, Hash},
     OpaqueExtrinsic as UncheckedExtrinsic, RuntimeDebug,
 };
-use sp_std::prelude::*;
+use sp_std::{if_std, prelude::*};
 use sp_trie::StorageProof;
 use state_machine::read_proof_check;
 use system::ensure_signed;
@@ -271,7 +271,6 @@ decl_module! {
             #[weight = MINIMUM_WEIGHT]
         fn submit_datagram(origin, datagram: Datagram) -> DispatchResult
         {
-            debug::RuntimeLogger::init();
             let _sender = ensure_signed(origin)?;
             Self::handle_datagram(datagram)
         }
@@ -355,7 +354,9 @@ impl<T: Trait> Module<T> {
             version: vec![], // getCompatibleVersions()
         };
 
-        debug::native::print!("connection inserted: {:?}", identifier);
+        if_std! {
+            println!("connection inserted: {:?}", identifier);
+        }
         Connections::insert(&identifier, connection_end);
         // addConnectionToClient(clientIdentifier, identifier)
         Clients::mutate(&client_identifier, |client_state| {
@@ -529,19 +530,25 @@ impl<T: Trait> Module<T> {
                 let justification = justification::GrandpaJustification::<Block>::decode(
                     &mut &*header.justification,
                 );
-                debug::native::print!(
-                    "consensus_state: {:?}, header: {:?}",
-                    consensus_state,
-                    header,
-                );
+                if_std! {
+                    println!(
+                        "consensus_state: {:?}, header: {:?}",
+                        consensus_state,
+                        header,
+                    );
+                }
                 if let Ok(justification) = justification {
                     let result = justification.verify(
                         consensus_state.set_id,
                         &consensus_state.authorities.iter().cloned().collect(),
                     );
-                    debug::native::print!("verify result: {:?}", result);
+                    if_std! {
+                        println!("verify result: {:?}", result);
+                    }
                     if result.is_ok() {
-                        debug::native::print!("block_hash: {:?}", header.block_hash);
+                        if_std! {
+                            println!("block_hash: {:?}", header.block_hash);
+                        }
                         assert_eq!(header.block_hash, justification.commit.target_hash);
                         Clients::mutate(&identifier, |client_state| {
                             (*client_state).latest_height = header.height;
@@ -551,11 +558,13 @@ impl<T: Trait> Module<T> {
                             authorities: consensus_state.authorities.clone(),
                             commitment_root: header.commitment_root,
                         };
-                        debug::native::print!(
-                            "consensus_state inserted: {:?}, {}",
-                            identifier,
-                            header.height
-                        );
+                        if_std! {
+                            println!(
+                                "consensus_state inserted: {:?}, {}",
+                                identifier,
+                                header.height
+                            );
+                        }
                         ConsensusStates::insert((identifier, header.height), new_consensus_state);
 
                         let result = read_proof_check::<BlakeTwo256>(
@@ -569,7 +578,9 @@ impl<T: Trait> Module<T> {
                             VersionedAuthorityList::decode(&mut &*result)
                                 .unwrap()
                                 .into();
-                        debug::native::print!("new_authorities: {:?}", new_authorities);
+                        if_std! {
+                            println!("new_authorities: {:?}", new_authorities);
+                        }
                         if new_authorities != consensus_state.authorities {
                             ConsensusStates::mutate(
                                 (identifier, header.height),
@@ -623,11 +634,13 @@ impl<T: Trait> Module<T> {
                     counterparty_client_identifier,
                     version: vec![],
                 };
-                debug::native::print!(
-                    "query consensus_state: {:?}, {}",
-                    client_identifier,
-                    proof_height
-                );
+                if_std! {
+                    println!(
+                        "query consensus_state: {:?}, {}",
+                        client_identifier,
+                        proof_height
+                    );
+                }
                 ensure!(
                     ConsensusStates::contains_key((client_identifier, proof_height)),
                     "ConsensusState not found"
@@ -1099,16 +1112,22 @@ impl<T: Trait> Module<T> {
                             return Some(connection_end);
                         }
                         Err(error) => {
-                            debug::native::print!("trie value decode error: {:?}", error);
+                            if_std! {
+                                println!("trie value decode error: {:?}", error);
+                            }
                         }
                     }
                 }
                 None => {
-                    debug::native::print!("read_proof_check error: value not exists");
+                    if_std! {
+                        println!("read_proof_check error: value not exists");
+                    }
                 }
             },
             Err(error) => {
-                debug::native::print!("read_proof_check error: {:?}", error);
+                if_std! {
+                    println!("read_proof_check error: {:?}", error);
+                }
             }
         }
 
@@ -1134,16 +1153,22 @@ impl<T: Trait> Module<T> {
                             return Some(channel_end);
                         }
                         Err(error) => {
-                            debug::native::print!("trie value decode error: {:?}", error);
+                            if_std! {
+                                println!("trie value decode error: {:?}", error);
+                            }
                         }
                     }
                 }
                 None => {
-                    debug::native::print!("read_proof_check error: value not exists");
+                    if_std! {
+                        println!("read_proof_check error: value not exists");
+                    }
                 }
             },
             Err(error) => {
-                debug::native::print!("read_proof_check error: {:?}", error);
+                if_std! {
+                    println!("read_proof_check error: {:?}", error);
+                }
             }
         }
 
@@ -1170,16 +1195,22 @@ impl<T: Trait> Module<T> {
                             return Some(hash);
                         }
                         Err(error) => {
-                            debug::native::print!("trie value decode error: {:?}", error);
+                            if_std! {
+                                println!("trie value decode error: {:?}", error);
+                            }
                         }
                     }
                 }
                 None => {
-                    debug::native::print!("read_proof_check error: value not exists");
+                    if_std! {
+                        println!("read_proof_check error: value not exists");
+                    }
                 }
             },
             Err(error) => {
-                debug::native::print!("read_proof_check error: {:?}", error);
+                if_std! {
+                    println!("read_proof_check error: {:?}", error);
+                }
             }
         }
 
