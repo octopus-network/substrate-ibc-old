@@ -224,6 +224,7 @@ decl_storage! {
         NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
         NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
         Packets: map hasher(blake2_128_concat) (Vec<u8>, H256, u64) => H256; // (port_identifier, channel_identifier, sequence) => Hash
+        Acknowledgements: map hasher(blake2_128_concat) (Vec<u8>, H256, u64) => H256; // (port_identifier, channel_identifier, sequence) => Hash
     }
 }
 
@@ -250,7 +251,7 @@ decl_event!(
         ChanOpenAckReceived,
         ChanOpenConfirmReceived,
         SendPacket(u64, Vec<u8>, u32, Vec<u8>, H256, Vec<u8>, H256),
-        RecvPacket(u64, Vec<u8>, u32, Vec<u8>, H256, Vec<u8>, H256),
+        RecvPacket(u64, Vec<u8>, u32, Vec<u8>, H256, Vec<u8>, H256, Vec<u8>),
         PacketRecvReceived,
         PacketAcknowledgementReceived,
     }
@@ -1000,11 +1001,21 @@ impl<T: Trait> Module<T> {
 
                 // all assertions passed (except sequence check), we can alter state
 
-                // if (acknowledgement.length > 0 || channel.order === UNORDERED)
-                //   provableStore.set(
-                //     packetAcknowledgementPath(packet.destPort, packet.destChannel, packet.sequence),
-                //     hash(acknowledgement)
-                //   )
+                // for testing
+                let acknowledgement: Vec<u8> = vec![1, 3, 3, 7];
+
+                if acknowledgement.len() > 0 || channel.ordering == ChannelOrder::Unordered {
+                    let hash = BlakeTwo256::hash_of(&acknowledgement);
+
+                    Acknowledgements::insert(
+                        (
+                            packet.dest_port.clone(),
+                            packet.dest_channel,
+                            packet.sequence,
+                        ),
+                        hash,
+                    );
+                }
 
                 if channel.ordering == ChannelOrder::Ordered {
                     let mut next_sequence_recv =
@@ -1030,6 +1041,7 @@ impl<T: Trait> Module<T> {
                     packet.source_channel,
                     packet.dest_port,
                     packet.dest_channel,
+                    acknowledgement,
                 ));
 
                 // return transparent packet
