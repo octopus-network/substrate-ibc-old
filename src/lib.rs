@@ -223,6 +223,7 @@ decl_storage! {
         Channels: map hasher(blake2_128_concat) (Vec<u8>, H256) => ChannelEnd; // (port_identifier, channel_identifier) => ChannelEnd
         NextSequenceSend: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
         NextSequenceRecv: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
+        NextSequenceAck: map hasher(blake2_128_concat) (Vec<u8>, H256) => u64; // (port_identifier, channel_identifier) => Sequence
         Packets: map hasher(blake2_128_concat) (Vec<u8>, H256, u64) => H256; // (port_identifier, channel_identifier, sequence) => Hash
         Acknowledgements: map hasher(blake2_128_concat) (Vec<u8>, H256, u64) => H256; // (port_identifier, channel_identifier, sequence) => Hash
     }
@@ -437,6 +438,7 @@ impl<T: Trait> Module<T> {
         // provableStore.set(channelCapabilityPath(portIdentifier, channelIdentifier), key)
         NextSequenceSend::insert((port_identifier.clone(), channel_identifier), 1);
         NextSequenceRecv::insert((port_identifier.clone(), channel_identifier), 1);
+        NextSequenceAck::insert((port_identifier.clone(), channel_identifier), 1);
         // return key
         Clients::mutate(&connection.client_identifier, |client_state| {
             (*client_state)
@@ -1062,8 +1064,8 @@ impl<T: Trait> Module<T> {
                 ensure!(channel.state == ChannelState::Open, "channel is not ready");
                 // abortTransactionUnless(authenticate(privateStore.get(channelCapabilityPath(packet.sourcePort, packet.sourceChannel))))
                 ensure!(
-                    packet.source_channel == channel.counterparty_channel_identifier,
-                    "source channel not match"
+                    packet.dest_channel == channel.counterparty_channel_identifier,
+                    "dest channel not match"
                 );
 
                 ensure!(
@@ -1076,13 +1078,23 @@ impl<T: Trait> Module<T> {
                     "connection has been closed"
                 );
                 ensure!(
-                    packet.source_port == channel.counterparty_port_identifier,
-                    "source port not match"
+                    packet.dest_port == channel.counterparty_port_identifier,
+                    "dest port not match"
                 );
 
                 // verify we sent the packet and haven't cleared it out yet
                 // abortTransactionUnless(provableStore.get(packetCommitmentPath(packet.sourcePort, packet.sourceChannel, packet.sequence))
                 //        === hash(packet.data, packet.timeout))
+                let timeout_height = packet.timeout_height.encode();
+                let expect_hash =
+                    BlakeTwo256::hash_of(&[&packet.data[..], &timeout_height[..]].concat());
+
+                let hash = Packets::get((
+                    packet.source_port.clone(),
+                    packet.source_channel,
+                    packet.sequence,
+                ));
+                ensure!(expect_hash == hash, "packet hash not match");
 
                 // abort transaction unless correct acknowledgement on counterparty chain
                 // abortTransactionUnless(connection.verifyPacketAcknowledgement(
@@ -1093,11 +1105,44 @@ impl<T: Trait> Module<T> {
                 //   packet.sequence,
                 //   hash(acknowledgement)
                 // ))
+                let value = Self::verify_packet_acknowledgement(
+                    connection.client_identifier,
+                    proof_height,
+                    proof,
+                    packet.dest_port.clone(),
+                    packet.dest_channel,
+                    packet.sequence,
+                );
+                ensure!(value.is_some(), "verify packet acknowledgement failed");
+                let hash = BlakeTwo256::hash_of(&acknowledgement);
+                ensure!(
+                    value.unwrap() == hash,
+                    "packet acknowledgement hash not match"
+                );
+
+                // abort transaction unless acknowledgement is processed in order
+                if channel.ordering == ChannelOrder::Ordered {
+                    let mut next_sequence_ack =
+                        NextSequenceAck::get((packet.dest_port.clone(), packet.dest_channel));
+                    ensure!(
+                        packet.sequence == next_sequence_ack,
+                        "recv sequence not match"
+                    );
+                    next_sequence_ack = next_sequence_ack + 1;
+                    NextSequenceAck::insert(
+                        (packet.dest_port.clone(), packet.dest_channel),
+                        next_sequence_ack,
+                    );
+                }
 
                 // all assertions passed, we can alter state
 
                 // delete our commitment so we can't "acknowledge" again
-                // provableStore.delete(packetCommitmentPath(packet.sourcePort, packet.sourceChannel, packet.sequence))
+                Acknowledgements::remove((
+                    packet.dest_port.clone(),
+                    packet.dest_channel,
+                    packet.sequence,
+                ));
 
                 // return transparent packet
                 // return packet
@@ -1197,6 +1242,48 @@ impl<T: Trait> Module<T> {
     ) -> Option<H256> {
         let consensus_state = ConsensusStates::get((client_identifier, proof_height));
         let key = Packets::hashed_key_for((port_identifier, channel_identifier, sequence));
+        let value = read_proof_check::<BlakeTwo256>(consensus_state.commitment_root, proof, &key);
+        match value {
+            Ok(value) => match value {
+                Some(value) => {
+                    let hash = H256::decode(&mut &*value);
+                    match hash {
+                        Ok(hash) => {
+                            return Some(hash);
+                        }
+                        Err(error) => {
+                            if_std! {
+                                println!("trie value decode error: {:?}", error);
+                            }
+                        }
+                    }
+                }
+                None => {
+                    if_std! {
+                        println!("read_proof_check error: value not exists");
+                    }
+                }
+            },
+            Err(error) => {
+                if_std! {
+                    println!("read_proof_check error: {:?}", error);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn verify_packet_acknowledgement(
+        client_identifier: H256,
+        proof_height: u32,
+        proof: StorageProof,
+        port_identifier: Vec<u8>,
+        channel_identifier: H256,
+        sequence: u64,
+    ) -> Option<H256> {
+        let consensus_state = ConsensusStates::get((client_identifier, proof_height));
+        let key = Acknowledgements::hashed_key_for((port_identifier, channel_identifier, sequence));
         let value = read_proof_check::<BlakeTwo256>(consensus_state.commitment_root, proof, &key);
         match value {
             Ok(value) => match value {
