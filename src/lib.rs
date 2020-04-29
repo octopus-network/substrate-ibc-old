@@ -9,10 +9,7 @@ mod state_machine;
 
 use codec::{Decode, Encode};
 use frame_support::{
-    decl_event, decl_module, decl_storage,
-    dispatch::DispatchResult,
-    ensure,
-    weights::{Weight, MINIMUM_WEIGHT},
+    decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure, weights::Weight,
 };
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
@@ -270,7 +267,7 @@ decl_module! {
         /// This is your public interface. Be extremely careful.
         /// This is just a simple example of how to interact with the module from the external
         /// world.
-            #[weight = MINIMUM_WEIGHT]
+            #[weight = 0]
         fn submit_datagram(origin, datagram: Datagram) -> DispatchResult
         {
             let _sender = ensure_signed(origin)?;
@@ -285,7 +282,7 @@ decl_module! {
             // Anything that needs to be done at the start of the block.
             // We don't do anything here.
 
-                  MINIMUM_WEIGHT
+                  0
         }
 
         // The signature could also look like: `fn on_finalize()`
