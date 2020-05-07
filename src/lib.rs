@@ -8,6 +8,7 @@ mod routing;
 mod state_machine;
 
 use codec::{Decode, Encode};
+use finality_grandpa::voter_set::VoterSet;
 use frame_support::{
     decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure, weights::Weight,
 };
@@ -537,11 +538,11 @@ impl<T: Trait> Module<T> {
                         header,
                     );
                 }
+                let authorities = VoterSet::new(consensus_state.authorities.iter().cloned());
+                ensure!(authorities.is_some(), "Invalid authorities set");
+                let authorities = authorities.unwrap();
                 if let Ok(justification) = justification {
-                    let result = justification.verify(
-                        consensus_state.set_id,
-                        &consensus_state.authorities.iter().cloned().collect(),
-                    );
+                    let result = justification.verify(consensus_state.set_id, &authorities);
                     if_std! {
                         println!("verify result: {:?}", result);
                     }

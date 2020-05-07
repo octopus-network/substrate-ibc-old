@@ -1,6 +1,6 @@
 use codec::{Decode, Encode};
 use finality_grandpa::{voter_set::VoterSet, Error as GrandpaError};
-use sp_finality_grandpa::{AuthorityId, AuthoritySignature, RoundNumber, SetId};
+use sp_finality_grandpa::{AuthorityId, AuthoritySignature, SetId};
 use sp_runtime::{
     traits::{Block as BlockT, Header as HeaderT, NumberFor},
     RuntimeDebug,
@@ -9,8 +9,6 @@ use sp_std::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
     prelude::*,
 };
-
-type Message<Block> = finality_grandpa::Message<<Block as BlockT>::Hash, NumberFor<Block>>;
 
 type Commit<Block> = finality_grandpa::Commit<
     <Block as BlockT>::Hash,
@@ -44,7 +42,7 @@ impl<Block: BlockT> GrandpaJustification<Block> {
         let mut buf = Vec::new();
         let mut visited_hashes = BTreeSet::new();
         for signed in self.commit.precommits.iter() {
-            if let Err(_) = check_message_sig_with_buffer::<Block>(
+            if let Err(_) = sp_finality_grandpa::check_message_signature_with_buffer(
                 &finality_grandpa::Message::Precommit(signed.precommit.clone()),
                 &signed.id,
                 &signed.signature,
@@ -84,36 +82,6 @@ impl<Block: BlockT> GrandpaJustification<Block> {
 
         Ok(())
     }
-}
-
-fn check_message_sig_with_buffer<Block: BlockT>(
-    message: &Message<Block>,
-    id: &AuthorityId,
-    signature: &AuthoritySignature,
-    round: RoundNumber,
-    set_id: SetId,
-    buf: &mut Vec<u8>,
-) -> Result<(), ()> {
-    use sp_runtime::RuntimeAppPublic;
-    let as_public = id.clone();
-    localized_payload_with_buffer(round, set_id, message, buf);
-
-    if as_public.verify(buf, signature) {
-        Ok(())
-    } else {
-        // debug!(target: "afg", "Bad signature on message from {:?}", id);
-        Err(())
-    }
-}
-
-fn localized_payload_with_buffer<E: Encode>(
-    round: RoundNumber,
-    set_id: SetId,
-    message: &E,
-    buf: &mut Vec<u8>,
-) {
-    buf.clear();
-    (message, round, set_id).encode_to(buf)
 }
 
 #[derive(RuntimeDebug)]
