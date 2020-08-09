@@ -42,7 +42,7 @@ impl<Block: BlockT> GrandpaJustification<Block> {
         let mut buf = Vec::new();
         let mut visited_hashes = BTreeSet::new();
         for signed in self.commit.precommits.iter() {
-            if let Err(_) = sp_finality_grandpa::check_message_signature_with_buffer(
+            if !sp_finality_grandpa::check_message_signature_with_buffer(
                 &finality_grandpa::Message::Precommit(signed.precommit.clone()),
                 &signed.id,
                 &signed.signature,

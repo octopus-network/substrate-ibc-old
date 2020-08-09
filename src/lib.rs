@@ -12,6 +12,7 @@ use finality_grandpa::voter_set::VoterSet;
 use frame_support::{
     decl_event, decl_module, decl_storage, dispatch::DispatchResult, ensure, weights::Weight,
 };
+use frame_system::ensure_signed;
 use sp_core::H256;
 use sp_finality_grandpa::{AuthorityList, SetId, VersionedAuthorityList, GRANDPA_AUTHORITIES_KEY};
 use sp_runtime::{
@@ -22,7 +23,6 @@ use sp_runtime::{
 use sp_std::{if_std, prelude::*};
 use sp_trie::StorageProof;
 use state_machine::read_proof_check;
-use system::ensure_signed;
 
 pub use clients::ClientType;
 
@@ -203,10 +203,10 @@ pub struct ChannelEnd {
 /// module is dependent on specific other modules, then their configuration traits
 /// should be added to our implied traits list.
 ///
-/// `system::Trait` should always be included in our implied traits.
-pub trait Trait: system::Trait {
+/// `frame_system::Trait` should always be included in our implied traits.
+pub trait Trait: frame_system::Trait {
     /// The overarching event type.
-    type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+    type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 }
 
 decl_storage! {
@@ -233,7 +233,7 @@ decl_event!(
     /// interesting and otherwise difficult to detect.
     pub enum Event<T>
     where
-        AccountId = <T as system::Trait>::AccountId,
+        AccountId = <T as frame_system::Trait>::AccountId,
     {
         SomethingStored(u32, AccountId),
         ClientCreated,
